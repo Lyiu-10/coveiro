@@ -1,0 +1,1666 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Coveiro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Grenze+Gotisch:wght@600;800&display=swap">
+<style>
+:root{
+  color-scheme: dark;
+  --tinta:#16131c;
+  --tinta-2:#211c29;
+  --tinta-3:#2c2536;
+  --osso:#efe6d2;
+  --osso-2:#b8ad97;
+  --ambar:#f2b544;
+  --sangue:#e0525a;
+  --musgo:#8fb36a;
+  --linha:rgba(239,230,210,.14);
+}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--tinta);color:var(--osso);font-family:"Fredoka",ui-rounded,"Segoe UI",system-ui,sans-serif;overflow:hidden;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+input{-webkit-user-select:text;user-select:text}
+#app{height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;padding-inline:16px;padding-block:8px}
+#hud{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px 16px;font-size:15px}
+.hud-grupo{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.num{font-variant-numeric:tabular-nums}
+#hud-dia{font-family:"Grenze Gotisch",Georgia,serif;font-weight:600;font-size:23px;line-height:1}
+.fase{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;padding:3px 9px;border-radius:999px}
+.fase.dia{background:var(--ambar);color:var(--tinta)}
+.fase.noite{background:#3a4174;color:var(--osso)}
+.relogio{width:120px;height:8px;border-radius:99px;background:var(--tinta-3);overflow:hidden}
+#hud-barra{height:100%;width:100%;background:var(--osso-2)}
+.dinheiro b{color:var(--ambar);font-size:21px;font-weight:700}
+.dinheiro span{color:var(--osso-2);font-size:13px;margin-left:4px}
+#hud-vida{color:var(--sangue);font-size:18px;letter-spacing:1px}
+#hud-vida .vazio{color:var(--tinta-3)}
+.chip{font-size:13px;padding:3px 10px;border:1px solid var(--linha);border-radius:999px;color:var(--osso-2)}
+#palco{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+#tela{display:block;border-radius:10px;box-shadow:0 0 0 1px var(--linha),0 18px 50px rgba(0,0,0,.45);touch-action:none}
+#dica{height:44px;flex:none;display:flex;align-items:center;justify-content:center;overflow:hidden;text-align:center;font-size:15px;color:var(--osso-2);line-height:1.4}
+#dica b{color:var(--osso);font-weight:600}
+kbd{font-family:inherit;font-size:.85em;font-weight:600;padding:1px 6px;border-radius:5px;background:var(--tinta-3);color:var(--osso);border:1px solid var(--linha);border-bottom-width:2px}
+#aviso{position:absolute;top:12px;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);box-sizing:border-box;padding:8px 14px;border-radius:10px;background:rgba(22,19,28,.9);border:1px solid var(--linha);font-size:14px;text-align:center;pointer-events:none;z-index:4}
+#painel{position:absolute;inset:0;display:flex;overflow:auto;padding:12px;box-sizing:border-box;background:rgba(12,10,16,.5);z-index:5}
+.cartao{margin:auto;width:min(580px,100%);box-sizing:border-box;background:var(--tinta-2);border:1px solid var(--linha);border-radius:14px;padding:22px 24px;display:flex;flex-direction:column;gap:14px;box-shadow:0 30px 80px rgba(0,0,0,.55)}
+.sobre{margin:0;font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ambar)}
+.cartao h1{margin:2px 0 0;font-family:"Grenze Gotisch",Georgia,serif;font-weight:800;font-size:clamp(56px,10vw,88px);line-height:.85;text-wrap:balance}
+.cartao h2{margin:2px 0 0;font-family:"Grenze Gotisch",Georgia,serif;font-weight:600;font-size:clamp(34px,6vw,46px);line-height:1;text-wrap:balance}
+.cartao h3{margin:0 0 6px;font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--osso-2)}
+.cartao p{margin:0;line-height:1.5;font-size:16px;max-width:62ch}
+.cartao ol{margin:0;padding-left:20px;line-height:1.55}
+.cartao a{color:var(--ambar)}
+.cartao .controles,.cartao .nota{font-size:14px;color:var(--osso-2)}
+.cartao .espera{color:var(--osso-2)}
+.blocos{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px 22px}
+.botoes{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{font:inherit;font-weight:600;font-size:17px;border:0;border-radius:10px;padding:12px 22px;background:var(--ambar);color:var(--tinta);cursor:pointer;align-self:flex-start}
+.btn:hover{background:#f6c563}
+.btn.sec{background:transparent;color:var(--osso);border:1px solid var(--linha)}
+.btn.sec:hover{background:var(--tinta-3)}
+.btn:focus-visible,.loja button:focus-visible{outline:3px solid var(--osso);outline-offset:2px}
+.linha-nome,.entrar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.cartao input[type=text]{font:inherit;font-size:16px;padding:10px 12px;border-radius:9px;border:1px solid var(--linha);background:var(--tinta-3);color:var(--osso);width:11em;max-width:100%;box-sizing:border-box}
+.cartao input[type=text]:focus-visible{outline:3px solid var(--ambar);outline-offset:1px}
+#codigo{width:6.5em;text-transform:uppercase;letter-spacing:.15em}
+.link-sala{font-family:ui-monospace,Consolas,monospace;font-size:14px;padding:10px 12px;border-radius:9px;background:var(--tinta-3);word-break:break-all;-webkit-user-select:text;user-select:text}
+.jogadores{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
+.jogadores li{display:flex;align-items:center;gap:7px;padding:5px 12px 5px 7px;border-radius:999px;background:var(--tinta-3);font-size:15px}
+.jogadores i{width:14px;height:14px;border-radius:50%;border:2px solid var(--osso-2)}
+.saldo{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.saldo b{font-size:30px;color:var(--ambar);font-variant-numeric:tabular-nums}
+.saldo span{color:var(--osso-2)}
+.alerta{padding:10px 12px;border-radius:10px;background:var(--tinta-3);font-size:15px;line-height:1.45}
+.loja{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.loja li{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 12px;border-radius:10px;background:var(--tinta-3)}
+.loja li div{display:flex;flex-direction:column;gap:2px}
+.loja small{color:var(--osso-2);font-size:13.5px;line-height:1.35}
+.loja button{font:inherit;font-weight:700;font-size:16px;min-width:74px;padding:8px 12px;border-radius:9px;border:0;background:var(--ambar);color:var(--tinta);cursor:pointer;font-variant-numeric:tabular-nums}
+.loja button:disabled{background:transparent;color:var(--osso-2);border:1px solid var(--linha);cursor:not-allowed}
+.resumo{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;font-size:16px}
+.resumo li{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--linha);padding-bottom:6px}
+.resumo b{font-variant-numeric:tabular-nums}
+#toque{position:absolute;inset:0;z-index:3;pointer-events:none}
+#joy-zona{position:absolute;left:0;top:0;bottom:0;width:55%;pointer-events:auto;touch-action:none}
+#joy-base{position:absolute;width:110px;height:110px;margin:-55px 0 0 -55px;border-radius:50%;border:2px solid rgba(239,230,210,.25);background:rgba(22,19,28,.25)}
+#joy-pino{position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:rgba(239,230,210,.4)}
+.btn-toque{position:absolute;pointer-events:auto;touch-action:none;border-radius:50%;border:2px solid rgba(239,230,210,.35);font:inherit;font-weight:600;color:var(--osso);background:rgba(22,19,28,.6)}
+#btn-acao{right:14px;bottom:18px;width:84px;height:84px;font-size:16px;background:rgba(242,181,68,.85);color:var(--tinta)}
+#btn-lampiao{right:110px;bottom:12px;width:62px;height:62px;font-size:12px}
+@media (max-width:560px){#hud{font-size:13px}.relogio{width:64px}#hud-dia{font-size:19px}.dinheiro b{font-size:18px}}
+</style>
+
+<div id="app">
+  <header id="hud">
+    <div class="hud-grupo">
+      <span id="hud-dia">Dia 1 de 5</span>
+      <span id="hud-fase" class="fase dia">Dia</span>
+      <div class="relogio" aria-hidden="true"><div id="hud-barra"></div></div>
+      <span id="hud-relogio" class="num">2:00</span>
+    </div>
+    <div class="hud-grupo">
+      <span class="dinheiro num"><b id="hud-dinheiro">$0</b><span id="hud-meta">de $200</span></span>
+      <span id="hud-vida" aria-label="Vida"></span>
+      <span id="hud-ferramenta" class="chip">Mãos</span>
+      <span id="hud-lampioes" class="chip">Lampiões 0</span>
+      <span id="hud-sala" class="chip" hidden></span>
+    </div>
+  </header>
+  <main id="palco">
+    <canvas id="tela" aria-label="O cemitério"></canvas>
+    <div id="aviso" hidden></div>
+    <div id="toque" hidden>
+      <div id="joy-zona"><div id="joy-base" hidden><div id="joy-pino"></div></div></div>
+      <button id="btn-lampiao" class="btn-toque" type="button">Lampião</button>
+      <button id="btn-acao" class="btn-toque" type="button">Ação</button>
+    </div>
+    <section id="painel" hidden></section>
+  </main>
+  <footer id="dica"></footer>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+// ===== Ajustes de balanceamento: mexa aqui =====
+const CFG = {
+  dias: 5,
+  meta: 200,            // dívida jogando sozinho; online cresce 50% por coveiro a mais
+  duracaoDia: 120,
+  duracaoNoite: 60,     // teto: a noite acaba antes quando o cemitério fica limpo
+  intervaloChegada: 20, // sozinho; online chega corpo mais rápido
+  chanceOgro: 0.3,
+  pagamento: { humano: 12, ogro: 26 },
+  gorjeta: 5,
+  profundidade: { humano: 1, ogro: 2 },
+  cavarPorSeg: 0.16,
+  fecharPorSeg: 0.5,
+  velocidade: 165,
+  vidaMax: 5,
+  precoLampiao: 15,
+  raioLampiao: 95,
+  precoTerreno: [0, 60, 100],
+  maxJogadores: 4,
+  ferramentas: [
+    { nome: 'Mãos', preco: 0, cavar: 1, dano: 1, desc: '' },
+    { nome: 'Pá', preco: 35, cavar: 2, dano: 2, desc: 'Cava e fecha 2× mais rápido que as mãos. Bate com força 2.' },
+    { nome: 'Cavadeira', preco: 90, cavar: 3, dano: 3, desc: 'Cava e fecha 3× mais rápido que as mãos. Bate com força 3.' },
+    { nome: 'Escavadeira', preco: 180, cavar: 5, dano: 5, desc: 'Cava e fecha 5× mais rápido que as mãos. Ogro nenhum segura.' },
+  ],
+  ladroes: d => 1 + Math.floor(d / 2),
+  roubo: d => 8 + 2 * d,
+  tempoRoubo: 5,
+  zumbi: {
+    humano: { vida: 3, vel: 62, dano: 1, r: 13 },
+    ogro: { vida: 8, vel: 46, dano: 2, r: 19 },
+  },
+};
+// Endereço público do jogo, mostrado a quem abre pelo Claude (onde o online não funciona)
+const LINK_ABERTO = 'https://lyiu-10.github.io/coveiro/';
+
+// ===== Mundo =====
+const W = 960, H = 560;
+const AREAS = [0, 1, 2].map(i => ({ x: 210 + i * 250, y: 60, w: 236, h: 460 }));
+const SLOTS = [0, 1, 2, 3].map(i => ({ x: 96, y: 132 + i * 72 }));
+const ESTANDES = [{ item: 'rosa', x: 64, y: 474 }, { item: 'vela', x: 140, y: 474 }];
+const CORES = ['#3d3550', '#2f6070', '#7a3b2e', '#56692f'];
+const NOMES = {
+  humano: ['Seu Juvenal', 'Dona Cotinha', 'Tio Nestor', 'Dona Filó', 'Seu Epaminondas', 'Dona Zuleica', 'Seu Tibúrcio', 'Dona Quitéria', 'Seu Anacleto', 'Dona Benedita', 'Seu Clodoaldo', 'Dona Ermelinda'],
+  ogro: ['Grumbo', 'Belarmina, a Ogra', 'Brutálio', 'Tonelada', 'Gorgonzola', 'Dona Rochedo'],
+};
+const ITEM = { rosa: 'rosa vermelha', vela: 'vela' };
+const COR = {
+  tinta: '#16131c', osso: '#efe6d2', ambar: '#f2b544', sangue: '#e0525a',
+  madeira: '#8a5a33', madeiraEsc: '#5e3c21', terra: '#7a5230', monte: '#6e4a2b',
+  buraco: ['#5a3a22', '#3b2616', '#24160a'], pedra: '#9a96a6', pedraOgro: '#80907a', mortalha: '#e6dcc4',
+};
+
+const $ = s => document.querySelector(s);
+const rnd = (a, b) => a + Math.random() * (b - a);
+const escolha = a => a[Math.floor(Math.random() * a.length)];
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const TAU = Math.PI * 2;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const corSegura = c => (/^#[0-9a-f]{6}$/i.test(c) ? c : CORES[0]);
+const limparNome = s => String(s || '').replace(/[^\p{L}\p{N} ._-]/gu, '').trim().slice(0, 14) || 'Coveiro';
+const reduzMov = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const toque = matchMedia('(pointer: coarse)').matches;
+const online = !window.claude; // dentro do Claude a conexão direta é bloqueada
+const salaUrl = (() => {
+  try { return (new URLSearchParams(location.search).get('sala') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4); }
+  catch (e) { return ''; }
+})();
+function mulberry(s) {
+  return () => {
+    s = s + 0x6D2B79F5 | 0;
+    let t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function lerNome() { try { return limparNome(localStorage.getItem('coveiro.nome')); } catch (e) { return 'Coveiro'; } }
+function salvarNome(n) { try { localStorage.setItem('coveiro.nome', n); } catch (e) { /* sem armazenamento */ } }
+
+const tela = $('#tela'), ctx = tela.getContext('2d'), palco = $('#palco');
+let escala = 1, dpr = 1;
+
+// ===== Estado =====
+let modo = 'solo'; // solo | anfitriao | convidado
+let estado = 'titulo', estadoPausado = null;
+let dia = 1, dinheiro = 0, relogio = CFG.duracaoDia, tChegada = 0, tNoite = 0, tLimpa = 0;
+let nivelFerr = 0, dono = [true, false, false], estoque = 0, meta = CFG.meta, tipoFim = null;
+let fila = [null, null, null, null], covas = [], lampioes = [], inimigos = [], flutuantes = [], agenda = [];
+let stats = { ganho: 0, roubado: 0, recuperado: 0 }, idCorpo = 0, idInimigo = 0;
+let escuro = 0.35, tremor = 0, tempo = 0, painelEm = 0;
+const novoJogador = (id, nome, cor) => ({
+  id, nome, cor, x: 184, y: 300, r: 14, dir: 0, carrega: null, vida: CFG.vidaMax, inv: 0, cdAtaque: 0, golpe: 0,
+  trabalhando: false, andando: false, caido: false, segurando: false, acaoSeq: 0, lampSeq: 0, compraSeq: 0, compraItem: '',
+});
+const p = novoJogador('eu', lerNome(), CORES[0]);
+let jogadores = [p];
+const ferramenta = () => CFG.ferramentas[nivelFerr];
+const teclas = new Set();
+const joy = { x: 0, y: 0 };
+let acaoToque = false;
+
+function criarCovas() {
+  covas = [];
+  AREAS.forEach((a, ai) => {
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) covas.push({
+      area: ai, x: a.x + 30 + c * 58, y: a.y + 80 + r * 150, w: 38, h: 64,
+      prof: 0, corpo: null, fechada: false, fechar: 0, enfeite: null,
+      pago: false, gorjeta: false, levantou: false, levantarEm: null,
+    });
+  });
+}
+
+function novoJogo() {
+  dia = 1; dinheiro = 0; nivelFerr = 0; dono = AREAS.map((_, i) => i === 0); estoque = 0; relogio = CFG.duracaoDia; tipoFim = null;
+  fila = [null, null, null, null]; lampioes = []; inimigos = []; flutuantes = []; agenda = [];
+  criarCovas();
+  meta = metaPara(jogadores.length);
+  jogadores.forEach((q, i) => Object.assign(q, { x: 184, y: 250 + i * 34, dir: 0, carrega: null, vida: CFG.vidaMax, inv: 0, cdAtaque: 0, golpe: 0, caido: false, trabalhando: false }));
+  stats = { ganho: 0, roubado: 0, recuperado: 0 };
+  chegar('humano'); chegar('humano');
+}
+const metaPara = n => Math.round(CFG.meta * (0.5 + 0.5 * n));
+const nLadroes = () => CFG.ladroes(dia) + Math.max(0, jogadores.length - 1);
+
+function chegar(especie) {
+  const i = fila.indexOf(null);
+  if (i < 0) return false;
+  especie = especie || (Math.random() < CFG.chanceOgro ? 'ogro' : 'humano');
+  const usados = new Set([...fila, ...covas.map(c => c.corpo)].filter(Boolean).map(c => c.nome));
+  const livres = NOMES[especie].filter(n => !usados.has(n));
+  fila[i] = { id: ++idCorpo, especie, nome: escolha(livres.length ? livres : NOMES[especie]), pedido: Math.random() < .5 ? 'rosa' : 'vela' };
+  return true;
+}
+
+const malResolvida = c => c.corpo && !c.levantou && !(c.fechada && c.enfeite === c.corpo.pedido);
+const iluminada = c => lampioes.some(l => Math.hypot(l.x - c.x, l.y - c.y) < CFG.raioLampiao);
+
+// ===== Fluxo do jogo (sozinho ou anfitrião) =====
+function comecarDia() {
+  estado = 'dia'; relogio = CFG.duracaoDia; tChegada = 0; stats.ganho = 0;
+  if (dia > 1) chegar();
+  renderPainel();
+  aviso(dia === 1 ? 'Pegue o primeiro corpo na carroça, à esquerda.' : `Dia ${dia}. A carroça chegou.`);
+}
+
+function anoitecer() {
+  estado = 'loja'; soltar();
+  renderPainel();
+}
+
+function comecarNoite() {
+  estado = 'noite'; relogio = CFG.duracaoNoite; tNoite = 0; tLimpa = 0; stats.roubado = 0; stats.recuperado = 0;
+  const n = nLadroes();
+  agenda = Array.from({ length: n }, (_, i) => 2 + i * (8 / Math.max(1, jogadores.length * .75)) + rnd(0, 2)).sort((a, b) => a - b);
+  covas.forEach(c => { if (malResolvida(c)) c.levantarEm = rnd(3, 10); });
+  renderPainel();
+  aviso(n === 1 ? 'Anoiteceu. Um ladrão vem aí.' : `Anoiteceu. ${n} ladrões vêm aí.`);
+}
+
+function amanhecer() {
+  inimigos.forEach(e => { if (e.tipo === 'zumbi') devolver(e); });
+  inimigos = [];
+  covas.forEach(c => { c.levantarEm = null; });
+  jogadores.forEach(q => { q.vida = CFG.vidaMax; q.inv = 0; q.caido = false; });
+  soltar();
+  if (dia >= CFG.dias) { fim(dinheiro >= meta ? 'vitoria' : 'divida'); return; }
+  dia++;
+  estado = 'amanhecer';
+  renderPainel();
+}
+
+function fim(tipo) {
+  estado = 'fim'; tipoFim = tipo; soltar();
+  renderPainel();
+}
+
+function pausar() { if (modo !== 'solo') return; estadoPausado = estado; estado = 'pausa'; soltar(); renderPainel(); }
+function despausar() { estado = estadoPausado; renderPainel(); }
+
+function comprar(item) {
+  if (item === 'ferramenta') {
+    const f = CFG.ferramentas[nivelFerr + 1];
+    if (f && dinheiro >= f.preco) { dinheiro -= f.preco; nivelFerr++; }
+  } else if (item === 'lampiao' && dinheiro >= CFG.precoLampiao) { dinheiro -= CFG.precoLampiao; estoque++; }
+  if (estado === 'loja') mostrarLoja();
+}
+
+// ===== Painéis =====
+function mostrarPainel(html) {
+  const el = $('#painel');
+  if (el.hidden) painelEm = performance.now();
+  el.innerHTML = html; el.hidden = false;
+}
+function esconderPainel() {
+  $('#painel').hidden = true;
+  const a = document.activeElement;
+  if (a && a.blur && a !== document.body) a.blur();
+}
+
+function renderPainel() {
+  switch (estado) {
+    case 'titulo': return mostrarTitulo();
+    case 'sala': return mostrarSala();
+    case 'loja': return mostrarLoja();
+    case 'amanhecer': return mostrarAmanhecer();
+    case 'fim': return mostrarFim();
+    case 'pausa': return mostrarPausa();
+    case 'dia': case 'noite': return esconderPainel();
+  }
+}
+
+const anfitriaoNome = () => { const h = jogadores.find(q => q.id === 'h'); return h ? h.nome : 'o anfitrião'; };
+const esperando = acao => `<p class="espera">Esperando ${esc(anfitriaoNome())} ${acao}.</p>`;
+
+function mostrarTitulo() {
+  const deitado = toque && matchMedia('(orientation: portrait)').matches ? ' Fica melhor com o celular deitado.' : '';
+  const controles = toque
+    ? `Arraste do lado esquerdo da tela para andar. Segure <b>Ação</b> para cavar e fechar.${deitado}`
+    : '<kbd>WASD</kbd> ou setas para andar · <kbd>Espaço</kbd> ação (segure para cavar e fechar) · <kbd>Q</kbd> lampião · <kbd>P</kbd> pausa';
+  const convite = online && salaUrl;
+  const botoes = convite
+    ? `<button class="btn" type="button" data-acao="entrar-link" data-principal>Entrar na sala ${esc(salaUrl)}</button>
+       <button class="btn sec" type="button" data-acao="solo">Jogar sozinho</button>`
+    : `<button class="btn" type="button" data-acao="solo" data-principal>Jogar sozinho</button>
+       ${online ? '<button class="btn sec" type="button" data-acao="criar">Criar partida online</button>' : ''}`;
+  mostrarPainel(`<div class="cartao">
+    <div><p class="sobre">Um cemitério, cinco dias, uma dívida</p><h1>Coveiro</h1></div>
+    <p>Seu tio morreu e deixou para você um cemitério e uma dívida de <b>$${CFG.meta}</b> com a prefeitura. Você tem ${CFG.dias} dias para pagar.</p>
+    <div class="blocos">
+      <div><h3>De dia · 2 minutos</h3><ol>
+        <li>Pegue um corpo na carroça.</li>
+        <li>Cave a cova. Ogro paga mais, mas pede cova grande.</li>
+        <li>Coloque o corpo e feche a cova.</li>
+        <li>Atenda o pedido do morto: rosa vermelha ou vela.</li>
+      </ol></div>
+      <div><h3>De noite</h3><p>Ladrões pulam o muro atrás das covas. Morto mal enterrado levanta e vem atrás de você. Bata com o que tiver na mão. A noite acaba quando o cemitério ficar limpo. Se a vida acabar, acabou.</p></div>
+    </div>
+    <p class="controles">${controles}</p>
+    ${online ? `<div class="linha-nome"><label for="nome">Seu nome</label><input id="nome" type="text" maxlength="14" value="${esc(p.nome)}" autocomplete="off" spellcheck="false"></div>` : ''}
+    <div class="botoes">${botoes}</div>
+    ${online && !convite ? `<div class="entrar"><input id="codigo" type="text" maxlength="4" placeholder="Código" autocomplete="off" spellcheck="false" aria-label="Código da sala"><button class="btn sec" type="button" data-acao="entrar">Entrar numa partida</button></div>` : ''}
+    ${!online && LINK_ABERTO ? `<p class="nota">Para jogar com amigos, abra o jogo neste endereço: <a href="${esc(LINK_ABERTO)}" target="_blank" rel="noopener">${esc(LINK_ABERTO.replace(/^https?:\/\//, ''))}</a></p>` : ''}
+  </div>`);
+}
+
+function mostrarSala() {
+  const anf = modo === 'anfitriao', n = jogadores.length;
+  const lista = jogadores.map(q => `<li><i style="background:${corSegura(q.cor)}"></i>${esc(q.nome)}${q === p ? ' (você)' : ''}</li>`).join('');
+  mostrarPainel(`<div class="cartao">
+    <div><p class="sobre">Partida online · sala ${esc(codigoSala)}</p><h2>${anf ? 'Chame o pessoal' : 'Você entrou'}</h2></div>
+    ${anf ? `<p>Mande este link. Cabem até ${CFG.maxJogadores} coveiros, e a partida começa quando você mandar.</p>
+      <div class="link-sala" id="link-sala">${esc(linkSala())}</div>
+      <div class="botoes"><button class="btn sec" type="button" data-acao="copiar">Copiar link</button></div>` : ''}
+    <div><h3>No cemitério · ${n} de ${CFG.maxJogadores}</h3><ul class="jogadores">${lista}</ul></div>
+    <p class="nota">${n > 1 ? `Com ${n} coveiros, a dívida sobe para $${metaPara(n)}, e chegam mais corpos e mais ladrões.` : `Sozinho, a dívida é de $${metaPara(1)}. Cada coveiro a mais aumenta a dívida, os corpos e os ladrões.`}</p>
+    ${anf ? '<button class="btn" type="button" data-acao="comecar" data-principal>Começar</button>' : esperando('começar')}
+  </div>`);
+}
+
+function mostrarLoja() {
+  const f = CFG.ferramentas[nivelFerr + 1];
+  const n = nLadroes();
+  const btn = (acao, preco) => `<button type="button" data-acao="${acao}"${dinheiro >= preco ? '' : ' disabled'}>$${preco}</button>`;
+  mostrarPainel(`<div class="cartao">
+    <div><p class="sobre">Anoitecer do dia ${dia} de ${CFG.dias}</p><h2>Loja do coveiro</h2></div>
+    <div class="saldo"><b>$${dinheiro}</b><span>no bolso · a dívida de $${meta} vence na alvorada do dia ${CFG.dias + 1}</span></div>
+    <div class="alerta">${n === 1 ? 'Um ladrão vem' : n + ' ladrões vêm'} esta noite. A noite acaba quando o cemitério ficar limpo.</div>
+    <ul class="loja">
+      ${f
+        ? `<li><div><b>${f.nome}</b><small>${f.desc}</small></div>${btn('ferramenta', f.preco)}</li>`
+        : `<li><div><b>${ferramenta().nome}</b><small>Vocês já têm a melhor ferramenta.</small></div></li>`}
+      <li><div><b>Lampião</b><small>Ladrão não mexe em cova iluminada. Coloque com ${toque ? 'o botão Lampião' : '<kbd>Q</kbd>'}. ${modo === 'solo' ? 'Você tem' : 'O time tem'} ${estoque}.</small></div>${btn('lampiao', CFG.precoLampiao)}</li>
+    </ul>
+    ${modo !== 'convidado' ? '<button class="btn" type="button" data-acao="noite" data-principal>Encarar a noite</button>' : esperando('encarar a noite')}
+  </div>`);
+}
+
+function mostrarAmanhecer() {
+  const perdido = stats.roubado - stats.recuperado;
+  const faltam = CFG.dias - dia + 1;
+  mostrarPainel(`<div class="cartao">
+    <div><p class="sobre">Amanheceu</p><h2>Dia ${dia} de ${CFG.dias}</h2></div>
+    <ul class="resumo">
+      <li><span>Ganhou ontem</span><b>$${stats.ganho}</b></li>
+      <li><span>Ladrões levaram</span><b>$${perdido}</b></li>
+    </ul>
+    <div class="saldo"><b>$${dinheiro}</b><span>de $${meta} · ${faltam === 1 ? 'último dia' : 'faltam ' + faltam + ' dias'}</span></div>
+    ${modo !== 'convidado' ? '<button class="btn" type="button" data-acao="dia" data-principal>Começar o dia</button>' : esperando('começar o dia')}
+  </div>`);
+}
+
+function mostrarFim() {
+  const enterros = covas.filter(c => c.pago || (c.corpo && c.fechada)).length;
+  const falta = Math.max(0, meta - dinheiro);
+  const time = jogadores.length > 1;
+  const t = {
+    vitoria: ['Alvorada do dia ' + (CFG.dias + 1), 'Dívida paga', `${time ? 'Vocês fecharam' : 'Você fechou'} com $${dinheiro} e ${enterros} enterros. A prefeitura largou do pé e o cemitério é ${time ? 'de vocês' : 'seu'}.`, 'Jogar de novo'],
+    divida: ['Alvorada do dia ' + (CFG.dias + 1), 'A prefeitura levou tudo', `${time ? 'Vocês chegaram' : 'Você chegou'} com $${dinheiro}. Faltaram $${falta} para a dívida de $${meta}. Foram ${enterros} enterros.`, 'Tentar de novo'],
+    morte: [`Noite do dia ${dia}`, time ? 'O time inteiro caiu' : 'Você virou cliente', time ? `Nenhum coveiro ficou de pé, com $${dinheiro} no caixa. Pelo menos o enterro sai de graça.` : `O coveiro caiu no próprio cemitério com $${dinheiro} no bolso. Pelo menos o enterro sai de graça.`, 'Tentar de novo'],
+  }[tipoFim] || ['Fim', 'Fim de jogo', '', 'Jogar de novo'];
+  mostrarPainel(`<div class="cartao">
+    <div><p class="sobre">${t[0]}</p><h2>${t[1]}</h2></div>
+    <p>${t[2]}</p>
+    ${modo !== 'convidado' ? `<button class="btn" type="button" data-acao="reiniciar" data-principal>${t[3]}</button>` : esperando('recomeçar')}
+  </div>`);
+}
+
+function mostrarPausa() {
+  mostrarPainel(`<div class="cartao">
+    <div><p class="sobre">Pausado</p><h2>O relógio parou</h2></div>
+    <p>Os mortos esperam. Os ladrões também.</p>
+    <button class="btn" type="button" data-acao="continuar" data-principal>Continuar</button>
+  </div>`);
+}
+
+function mostrarMensagem(titulo, texto, botao) {
+  mostrarPainel(`<div class="cartao">
+    <div><p class="sobre">Partida online</p><h2>${titulo}</h2></div>
+    <p>${texto}</p>
+    ${botao ? `<button class="btn" type="button" data-acao="voltar" data-principal>${botao}</button>` : ''}
+  </div>`);
+}
+
+$('#painel').addEventListener('click', e => {
+  const b = e.target.closest('[data-acao]');
+  if (!b || b.disabled || performance.now() - painelEm < 250) return;
+  const acao = b.dataset.acao;
+  switch (acao) {
+    case 'solo': modo = 'solo'; novoJogo(); comecarDia(); break;
+    case 'criar': criarSala(); break;
+    case 'entrar': entrarSala(($('#codigo') || {}).value || ''); break;
+    case 'entrar-link': entrarSala(salaUrl); break;
+    case 'comecar': novoJogo(); comecarDia(); break;
+    case 'dia': comecarDia(); break;
+    case 'noite': comecarNoite(); break;
+    case 'continuar': despausar(); break;
+    case 'reiniciar': novoJogo(); comecarDia(); break;
+    case 'copiar': copiarLink(); break;
+    case 'voltar': voltarInicio(); break;
+    case 'ferramenta': case 'lampiao':
+      if (modo === 'convidado') { p.compraSeq++; p.compraItem = acao; enviarEntrada(true); } else comprar(acao);
+      break;
+  }
+});
+$('#painel').addEventListener('input', e => {
+  if (e.target.id === 'nome') { p.nome = limparNome(e.target.value); salvarNome(p.nome); }
+});
+
+let avisoTimer = 0;
+function avisoLocal(txt) {
+  const el = $('#aviso');
+  el.textContent = txt; el.hidden = false;
+  clearTimeout(avisoTimer);
+  avisoTimer = setTimeout(() => { el.hidden = true; }, 3200);
+}
+// Mostra para um jogador (q) ou para todos; o anfitrião repassa aos convidados
+function aviso(txt, q) {
+  if (!q || q === p) avisoLocal(txt);
+  if (modo === 'anfitriao' && q !== p) eventos.push({ a: txt, para: q ? q.id : undefined });
+}
+function avisoOutros(txt, q) {
+  if (q !== p) avisoLocal(txt);
+  if (modo === 'anfitriao') eventos.push({ a: txt, exceto: q.id });
+}
+function flutua(x, y, txt, cor, q) {
+  const f = { x: Math.max(70, Math.min(W - 70, x)), y: Math.max(56, Math.min(H - 20, y)), txt, cor, t: 0 };
+  if (!q || q === p) flutuantes.push(f);
+  if (modo === 'anfitriao' && q !== p) eventos.push({ f: [Math.round(f.x), Math.round(f.y), txt, cor], para: q ? q.id : undefined });
+}
+function tremer(t, q) {
+  if ((!q || q === p) && !reduzMov) tremor = Math.max(tremor, t);
+  if (modo === 'anfitriao' && q !== p) eventos.push({ tr: t, para: q ? q.id : undefined });
+}
+
+// ===== Entrada =====
+const segurando = () => acaoToque || teclas.has(' ') || teclas.has('e') || teclas.has('j');
+function soltar() { teclas.clear(); acaoToque = false; joy.x = 0; joy.y = 0; p.andando = false; p.trabalhando = false; }
+function apertar() {
+  if (estado !== 'dia' && estado !== 'noite') return;
+  if (modo === 'convidado') { if (!p.caido) { p.acaoSeq++; enviarEntrada(true); } }
+  else acaoPress(p);
+}
+function pedirLampiao() {
+  if (estado !== 'dia' && estado !== 'noite') return;
+  if (modo === 'convidado') { p.lampSeq++; enviarEntrada(true); } else colocarLampiao(p);
+}
+
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  const jogando = estado === 'dia' || estado === 'noite';
+  const foco = document.activeElement;
+  if (foco && foco.tagName === 'INPUT') {
+    if (k === 'enter' && !e.repeat) {
+      const b = foco.id === 'codigo' ? $('#painel [data-acao=entrar]') : $('#painel [data-principal]');
+      if (b) { e.preventDefault(); b.click(); }
+    }
+    return;
+  }
+  if (jogando && [' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
+  if ((k === 'p' || k === 'escape') && !e.repeat) {
+    if (jogando) pausar(); else if (estado === 'pausa') despausar();
+    return;
+  }
+  if (!jogando) {
+    if (k === 'enter' && !e.repeat && !(foco && foco.closest && foco.closest('#painel button'))) {
+      const b = $('#painel [data-principal]');
+      if (b && performance.now() - painelEm > 300) { e.preventDefault(); b.click(); }
+    }
+    return;
+  }
+  teclas.add(k);
+  if (e.repeat) return;
+  if (k === ' ' || k === 'e' || k === 'j') apertar();
+  if (k === 'q' || k === 'l') pedirLampiao();
+});
+addEventListener('keyup', e => teclas.delete(e.key.toLowerCase()));
+addEventListener('blur', soltar);
+
+// ===== Ações dos coveiros =====
+function distRet(x, y, c) {
+  const dx = Math.max(Math.abs(x - c.x) - c.w / 2, 0), dy = Math.max(Math.abs(y - c.y) - c.h / 2, 0);
+  return Math.hypot(dx, dy);
+}
+
+function alvoAtual(q) {
+  let melhor = null, md = Infinity;
+  SLOTS.forEach((s, i) => { const d = Math.hypot(q.x - s.x, q.y - s.y); if (d < 44 && d < md) { md = d; melhor = { tipo: 'slot', i }; } });
+  ESTANDES.forEach(s => { const d = Math.hypot(q.x - s.x, q.y - s.y); if (d < 42 && d < md) { md = d; melhor = { tipo: 'estande', item: s.item }; } });
+  AREAS.forEach((ar, i) => {
+    if (dono[i]) return;
+    const d = Math.hypot(q.x - (ar.x + ar.w / 2), q.y - (ar.y + ar.h / 2));
+    if (d < 70 && d < md) { md = d; melhor = { tipo: 'placa', area: i }; }
+  });
+  covas.forEach(c => {
+    if (!dono[c.area]) return;
+    const d = distRet(q.x, q.y, c);
+    if (d < 20 && d < md) { md = d; melhor = { tipo: 'cova', cova: c }; }
+  });
+  return melhor;
+}
+
+function inimigoPerto(q, r) {
+  let m = null, md = Infinity;
+  for (const e of inimigos) {
+    if (e.remover) continue;
+    const d = Math.hypot(e.x - q.x, e.y - q.y) - e.r;
+    if (d < r && d < md) { md = d; m = e; }
+  }
+  return m;
+}
+
+function acaoPress(q) {
+  if ((estado !== 'dia' && estado !== 'noite') || q.caido) return;
+  const inimigo = inimigoPerto(q, 40);
+  if (inimigo) { if (q.cdAtaque <= 0) atacar(q, inimigo); return; }
+  const a = alvoAtual(q);
+  if (!a) return;
+  const leva = q.carrega;
+
+  if (a.tipo === 'slot') {
+    const c = fila[a.i];
+    if (c && !leva) {
+      q.carrega = { tipo: 'corpo', corpo: c }; fila[a.i] = null;
+      aviso(`${c.nome} quer ${ITEM[c.pedido]}. Precisa de cova ${c.especie === 'ogro' ? 'grande' : 'pequena'}.`, q);
+    } else if (!c && leva && leva.tipo === 'corpo') {
+      fila[a.i] = leva.corpo; q.carrega = null;
+    } else if (c && leva) {
+      flutua(q.x, q.y - 34, 'Mãos ocupadas', COR.osso, q);
+    }
+    return;
+  }
+
+  if (a.tipo === 'estande') {
+    if (leva && leva.tipo === 'corpo') { flutua(q.x, q.y - 34, 'Mãos ocupadas', COR.osso, q); return; }
+    if (leva && leva.item === a.item) { q.carrega = null; return; }
+    q.carrega = { tipo: 'item', item: a.item };
+    return;
+  }
+
+  if (a.tipo === 'placa') {
+    const preco = CFG.precoTerreno[a.area], ar = AREAS[a.area];
+    if (dinheiro >= preco) {
+      dinheiro -= preco; dono[a.area] = true;
+      flutua(ar.x + ar.w / 2, ar.y + ar.h / 2 - 40, `-$${preco}`, COR.ambar);
+      aviso(`${modo === 'solo' ? 'Terreno comprado' : q.nome + ' comprou o terreno'}. Mais 12 lotes para covas.`);
+    } else flutua(q.x, q.y - 34, `Faltam $${preco - dinheiro}`, COR.osso, q);
+    return;
+  }
+
+  const c = a.cova;
+  if (c.levantou) return;
+  if (leva && leva.tipo === 'corpo' && !c.corpo) {
+    const req = CFG.profundidade[leva.corpo.especie];
+    if (c.prof >= req) {
+      c.corpo = leva.corpo; q.carrega = null; c.fechada = false; c.fechar = 0;
+      flutua(c.x, c.y - 44, 'Na cova', COR.osso);
+    } else {
+      flutua(c.x, c.y - 44, c.prof < 1 ? 'Cave primeiro' : 'Pequena demais', COR.osso, q);
+    }
+    return;
+  }
+  if (leva && leva.tipo === 'item' && c.corpo && c.fechada && c.enfeite !== c.corpo.pedido) {
+    if (leva.item === c.corpo.pedido) {
+      c.enfeite = leva.item; q.carrega = null;
+      if (!c.gorjeta) { c.gorjeta = true; ganhar(CFG.gorjeta, c.x, c.y - 48); }
+      else flutua(c.x, c.y - 48, 'Enfeitada', COR.osso);
+    } else {
+      flutua(c.x, c.y - 48, `Queria ${ITEM[c.corpo.pedido]}`, COR.osso, q);
+    }
+  }
+}
+
+function segurar(q, dt, segura) {
+  q.trabalhando = false;
+  if (!segura || q.caido) return;
+  const inimigo = inimigoPerto(q, 40);
+  if (inimigo) { if (q.cdAtaque <= 0) atacar(q, inimigo); return; }
+  const a = alvoAtual(q);
+  if (!a || a.tipo !== 'cova') return;
+  const c = a.cova, f = ferramenta();
+  if (c.levantou) return;
+  if (c.corpo && !c.fechada) {
+    c.fechar = Math.min(1, c.fechar + CFG.fecharPorSeg * f.cavar * dt);
+    q.trabalhando = true;
+    if (c.fechar >= 1) {
+      c.fechada = true;
+      if (!c.pago) { c.pago = true; ganhar(CFG.pagamento[c.corpo.especie], c.x, c.y - 48); }
+      else flutua(c.x, c.y - 48, 'Fechada', COR.osso);
+    }
+    return;
+  }
+  if (!c.corpo && c.prof < 2) {
+    const leva = q.carrega;
+    if (leva && leva.tipo === 'corpo' && c.prof >= CFG.profundidade[leva.corpo.especie]) return;
+    const antes = c.prof;
+    c.prof = Math.min(2, c.prof + CFG.cavarPorSeg * f.cavar * dt);
+    q.trabalhando = true;
+    if (antes < 1 && c.prof >= 1) flutua(c.x, c.y - 48, 'Cova pequena', COR.osso);
+    if (antes < 2 && c.prof >= 2) flutua(c.x, c.y - 48, 'Cova grande', COR.osso);
+  }
+}
+
+function ganhar(v, x, y) {
+  dinheiro += v; stats.ganho += v;
+  flutua(x, y, `+$${v}`, COR.ambar);
+}
+
+function colocarLampiao(q) {
+  if (estado !== 'dia' && estado !== 'noite') return;
+  if (estoque <= 0) { aviso('Não tem lampião. Dá para comprar no anoitecer.', q); return; }
+  if (lampioes.some(l => Math.hypot(l.x - q.x, l.y - q.y) < 30)) { flutua(q.x, q.y - 34, 'Já tem um aqui', COR.osso, q); return; }
+  lampioes.push({ x: Math.round(q.x), y: Math.round(q.y + 4) }); estoque--;
+  flutua(q.x, q.y - 34, 'Lampião aceso', COR.ambar);
+}
+
+function atacar(q, e) {
+  const a = Math.atan2(e.y - q.y, e.x - q.x);
+  e.vida -= ferramenta().dano; e.flash = .12;
+  q.cdAtaque = .35; q.golpe = .16; q.dir = a;
+  e.x += Math.cos(a) * 22; e.y += Math.sin(a) * 22;
+  if (e.tipo === 'ladrao' && e.estado === 'roubando') e.prog = Math.max(0, e.prog - .35);
+  if (e.vida <= 0) derrotar(e);
+}
+
+function derrotar(e) {
+  e.remover = true;
+  if (e.tipo === 'zumbi') { devolver(e); flutua(e.x, e.y - 30, 'De volta pra cova', COR.osso); return; }
+  if (e.saque > 0) {
+    dinheiro += e.saque; stats.recuperado += e.saque;
+    flutua(e.x, e.y - 30, `+$${e.saque} de volta`, COR.ambar);
+  } else flutua(e.x, e.y - 30, 'Fugiu!', COR.osso);
+}
+
+function ferir(q, d, fonte) {
+  if (q.inv > 0 || q.caido || estado !== 'noite') return;
+  q.vida -= d; q.inv = .8; tremer(.25, q);
+  const a = Math.atan2(q.y - fonte.y, q.x - fonte.x);
+  q.x += Math.cos(a) * 14; q.y += Math.sin(a) * 14; prender(q);
+  flutua(q.x, q.y - 34, `-${d} de vida`, COR.sangue);
+  if (q.vida > 0) return;
+  q.vida = 0; q.caido = true; q.trabalhando = false;
+  if (q.carrega && q.carrega.tipo === 'corpo') { const i = fila.indexOf(null); if (i >= 0) { fila[i] = q.carrega.corpo; q.carrega = null; } }
+  if (jogadores.every(o => o.caido)) { fim('morte'); return; }
+  aviso('Você caiu. Volta no amanhecer.', q);
+  avisoOutros(`${q.nome} caiu. Volta no amanhecer.`, q);
+}
+
+// ===== Inimigos =====
+function novoLadrao() {
+  const lado = escolha(['direita', 'baixo', 'cima']);
+  const pos = lado === 'direita' ? { x: W + 16, y: rnd(80, H - 40) }
+    : lado === 'baixo' ? { x: rnd(260, W - 30), y: H + 16 }
+    : { x: rnd(260, W - 30), y: 18 };
+  inimigos.push({ id: ++idInimigo, tipo: 'ladrao', x: pos.x, y: pos.y, r: 13, vida: 2 + Math.floor(dia / 3), vel: 92, estado: 'indo', alvo: null, prog: 0, saque: 0, cd: .6, flash: 0, dir: Math.PI });
+  aviso('Um ladrão pulou o muro!');
+  flutua(pos.x, pos.y, 'Ladrão!', COR.sangue);
+}
+
+function levantar(c) {
+  const z = CFG.zumbi[c.corpo.especie];
+  c.levantou = true; c.fechada = false; c.fechar = 0; c.enfeite = null;
+  inimigos.push({ id: ++idInimigo, tipo: 'zumbi', especie: c.corpo.especie, x: c.x, y: c.y, r: z.r, vida: z.vida, vel: z.vel, dano: z.dano, cova: c, cd: .8, flash: 0, dir: 0 });
+  flutua(c.x, c.y - 44, `${c.corpo.nome} levantou!`, COR.sangue);
+  tremer(.2);
+}
+function devolver(z) { z.cova.levantou = false; }
+
+const alvoValido = c => c && c.corpo && c.fechada && !c.levantou && !iluminada(c);
+function escolherAlvo(e) {
+  const livres = covas.filter(c => alvoValido(c) && !inimigos.some(o => o !== e && o.alvo === c));
+  const ricas = livres.filter(c => c.enfeite);
+  const pool = ricas.length ? ricas : livres;
+  if (!pool.length) return null;
+  return pool.reduce((m, c) => dist(c, e) < dist(m, e) ? c : m);
+}
+function coveiroMaisPerto(e) {
+  let m = null, md = Infinity;
+  jogadores.forEach(q => { if (q.caido) return; const d = dist(q, e); if (d < md) { md = d; m = q; } });
+  return m;
+}
+
+function andarAte(e, tx, ty, passo) {
+  const dx = tx - e.x, dy = ty - e.y, d = Math.hypot(dx, dy);
+  if (d <= passo || d < 1) { e.x = tx; e.y = ty; return true; }
+  e.x += dx / d * passo; e.y += dy / d * passo; e.dir = Math.atan2(dy, dx);
+  return false;
+}
+
+function saida(e) {
+  const op = [{ x: W + 30, y: e.y }, { x: e.x, y: H + 30 }, { x: e.x, y: -30 }];
+  return op.reduce((m, o) => dist(o, e) < dist(m, e) ? o : m);
+}
+
+function roubar(e) {
+  const c = e.alvo, v = Math.min(dinheiro, CFG.roubo(dia));
+  dinheiro -= v; e.saque = v; stats.roubado += v;
+  c.fechada = false; c.fechar = 0; c.enfeite = null;
+  flutua(c.x, c.y - 44, v > 0 ? `-$${v}` : 'Revirou a cova', COR.sangue);
+  aviso(v > 0 ? `Roubaram $${v}! Pegue o ladrão antes que ele fuja.` : 'Um ladrão revirou uma cova.');
+  e.estado = 'fugindo'; e.alvo = null;
+}
+
+function atualizarInimigos(dt) {
+  for (const e of inimigos) {
+    if (e.remover) continue;
+    e.cd = Math.max(0, e.cd - dt); e.flash = Math.max(0, e.flash - dt);
+    if (e.tipo === 'zumbi') {
+      const q = coveiroMaisPerto(e);
+      if (!q) continue;
+      andarAte(e, q.x, q.y, e.vel * dt);
+      if (dist(e, q) < e.r + q.r + 2 && e.cd <= 0) { e.cd = 1; ferir(q, e.dano, e); }
+      continue;
+    }
+    if (e.estado === 'indo') {
+      if (!alvoValido(e.alvo)) e.alvo = escolherAlvo(e);
+      if (!e.alvo) { e.estado = 'fugindo'; flutua(e.x, e.y - 28, 'Nada pra levar', COR.osso); }
+      else if (andarAte(e, e.alvo.x + 26, e.alvo.y, e.vel * dt)) { e.estado = 'roubando'; e.prog = 0; }
+    } else if (e.estado === 'roubando') {
+      if (!alvoValido(e.alvo)) { e.estado = 'indo'; e.alvo = null; }
+      else { e.dir = Math.PI; e.prog += dt / CFG.tempoRoubo; if (e.prog >= 1) roubar(e); }
+    } else {
+      const s = saida(e);
+      if (andarAte(e, s.x, s.y, e.vel * 1.3 * dt)) e.remover = true;
+    }
+    if (e.estado !== 'fugindo' && e.cd <= 0) {
+      const q = jogadores.find(o => !o.caido && dist(o, e) < e.r + o.r + 6);
+      if (q) { e.cd = 1.4; ferir(q, 1, e); }
+    }
+  }
+  for (let i = 0; i < inimigos.length; i++) for (let j = i + 1; j < inimigos.length; j++) {
+    const a = inimigos[i], b = inimigos[j];
+    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1, m = a.r + b.r;
+    if (d < m) { const k = (m - d) / 2; a.x -= dx / d * k; a.y -= dy / d * k; b.x += dx / d * k; b.y += dy / d * k; }
+  }
+  inimigos = inimigos.filter(e => !e.remover);
+}
+
+// ===== Atualização =====
+function prender(q) {
+  q.x = Math.max(q.r, Math.min(W - q.r, q.x));
+  q.y = Math.max(46, Math.min(H - q.r, q.y));
+}
+
+function mover(dt) {
+  if (p.caido) { p.andando = false; return; }
+  let dx = 0, dy = 0;
+  if (teclas.has('arrowleft') || teclas.has('a')) dx--;
+  if (teclas.has('arrowright') || teclas.has('d')) dx++;
+  if (teclas.has('arrowup') || teclas.has('w')) dy--;
+  if (teclas.has('arrowdown') || teclas.has('s')) dy++;
+  dx += joy.x; dy += joy.y;
+  const m = Math.hypot(dx, dy);
+  p.andando = m > 0.15;
+  if (!p.andando) return;
+  if (m > 1) { dx /= m; dy /= m; }
+  const pesado = p.carrega && p.carrega.tipo === 'corpo' && p.carrega.corpo.especie === 'ogro';
+  const vel = CFG.velocidade * (pesado ? 0.7 : 1);
+  p.x += dx * vel * dt; p.y += dy * vel * dt;
+  p.dir = Math.atan2(dy, dx);
+  prender(p);
+}
+
+function atualizar(dt) {
+  tempo += dt;
+  tremor = Math.max(0, tremor - dt);
+  const fase = estado === 'pausa' ? estadoPausado : estado;
+  const alvoEscuro = fase === 'noite' ? .8 : fase === 'loja' ? .55 : (fase === 'titulo' || fase === 'sala' || fase === 'conexao') ? .35
+    : fase === 'dia' && relogio < 15 ? (1 - relogio / 15) * .4 : fase === 'fim' ? .45 : 0;
+  escuro += (alvoEscuro - escuro) * Math.min(1, dt * 2);
+  flutuantes.forEach(f => { f.t += dt; f.y -= 22 * dt; });
+  flutuantes = flutuantes.filter(f => f.t < 1.4);
+
+  if (modo === 'convidado') {
+    if (estado === 'dia' || estado === 'noite') { relogio = Math.max(0, relogio - dt); mover(dt); }
+    suavizar(dt);
+    enviarEntrada(false);
+    return;
+  }
+  if (estado !== 'dia' && estado !== 'noite') return;
+
+  relogio -= dt;
+  jogadores.forEach(q => { q.inv = Math.max(0, q.inv - dt); q.cdAtaque = Math.max(0, q.cdAtaque - dt); q.golpe = Math.max(0, q.golpe - dt); });
+  mover(dt);
+  jogadores.forEach(q => segurar(q, dt, q === p ? segurando() : q.segurando));
+
+  if (estado === 'dia') {
+    tChegada += dt;
+    if (tChegada >= CFG.intervaloChegada / (0.5 + 0.5 * jogadores.length)) {
+      tChegada = 0;
+      if (chegar()) flutua(96, 96, 'Chegou mais um', COR.osso);
+    }
+    if (relogio <= 0) anoitecer();
+    return;
+  }
+
+  tNoite += dt;
+  while (agenda.length && agenda[0] <= tNoite) { agenda.shift(); novoLadrao(); }
+  covas.forEach(c => {
+    if (c.levantarEm == null) return;
+    c.levantarEm -= dt;
+    if (c.levantarEm <= 0) { c.levantarEm = null; if (malResolvida(c)) levantar(c); }
+  });
+  atualizarInimigos(dt);
+  if (estado !== 'noite') return;
+  const limpa = !agenda.length && !inimigos.length && !covas.some(c => c.levantarEm != null);
+  if (limpa && tLimpa === 0) aviso('Cemitério limpo. Já vai amanhecer.');
+  tLimpa = limpa ? tLimpa + dt : 0;
+  if (tLimpa >= 1.5 || relogio <= 0) amanhecer();
+}
+
+// ===== Rede: partida online com conexão direta entre navegadores (PeerJS) =====
+const PREFIXO = 'coveiro-jogo-';
+let peer = null, conexaoAnfitriao = null, codigoSala = '', eventos = [], ultimoEnvio = 0, ultimoMundo = 0, assinatura = '';
+const conexoes = new Map();
+
+function carregarPeer() {
+  if (window.Peer) return Promise.resolve();
+  return new Promise((ok, falha) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js';
+    s.onload = ok; s.onerror = falha;
+    document.head.appendChild(s);
+  });
+}
+const linkSala = () => location.origin + location.pathname + '?sala=' + codigoSala;
+function novoCodigo() {
+  const L = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  return Array.from({ length: 4 }, () => L[Math.floor(Math.random() * L.length)]).join('');
+}
+
+function erroRede(msg) {
+  if (peer) { try { peer.destroy(); } catch (e) { /* já fechado */ } }
+  peer = null; conexaoAnfitriao = null; conexoes.clear();
+  modo = 'solo'; p.id = 'eu'; jogadores = [p];
+  estado = 'conexao';
+  mostrarMensagem('Não conectou', msg, 'Voltar ao início');
+}
+
+function voltarInicio() {
+  if (peer) { try { peer.destroy(); } catch (e) { /* já fechado */ } }
+  peer = null; conexaoAnfitriao = null; conexoes.clear(); codigoSala = '';
+  modo = 'solo'; p.id = 'eu'; jogadores = [p];
+  try { if (location.search) history.replaceState(null, '', location.pathname); } catch (e) { /* sem histórico */ }
+  estado = 'titulo'; novoJogo(); renderPainel();
+}
+
+async function criarSala() {
+  estado = 'conexao';
+  mostrarMensagem('Criando a sala', 'Conectando ao servidor do multiplayer.');
+  try { await carregarPeer(); } catch (e) { erroRede('Não deu para carregar o multiplayer. Confira a internet e tente de novo.'); return; }
+  codigoSala = novoCodigo();
+  const este = peer = new Peer(PREFIXO + codigoSala);
+  este.on('open', () => {
+    if (peer !== este) return;
+    modo = 'anfitriao'; p.id = 'h'; jogadores = [p];
+    estado = 'sala'; renderPainel();
+  });
+  este.on('connection', aceitar);
+  este.on('disconnected', () => { try { if (!este.destroyed) este.reconnect(); } catch (e) { /* tenta de novo depois */ } });
+  este.on('error', e => {
+    if (peer !== este) return;
+    if (e.type === 'unavailable-id') { este.destroy(); peer = null; criarSala(); return; }
+    if (modo === 'anfitriao') { if (e.type !== 'peer-unavailable') avisoLocal('Instabilidade na conexão (' + e.type + ').'); return; }
+    erroRede('Não deu para criar a sala (' + e.type + '). Tente de novo.');
+  });
+}
+
+function aceitar(conn) {
+  conn.on('open', () => {
+    if (jogadores.length >= CFG.maxJogadores) { conn.send({ t: 'cheia' }); setTimeout(() => conn.close(), 400); return; }
+    const cor = CORES.find(c => !jogadores.some(q => q.cor === c)) || CORES[1];
+    const q = novoJogador(conn.peer, 'Coveiro', cor);
+    q.conn = conn; q.x = 184; q.y = 300;
+    jogadores.push(q); conexoes.set(conn.peer, q);
+    conn.send({ t: 'bem', id: q.id });
+    if (estado === 'sala') renderPainel();
+  });
+  conn.on('data', d => receberDoConvidado(conn.peer, d));
+  conn.on('close', () => sair(conn.peer));
+  conn.on('error', () => sair(conn.peer));
+}
+
+function sair(id) {
+  const q = conexoes.get(id);
+  if (!q) return;
+  conexoes.delete(id);
+  jogadores = jogadores.filter(o => o !== q);
+  if (q.carrega && q.carrega.tipo === 'corpo') { const i = fila.indexOf(null); if (i >= 0) fila[i] = q.carrega.corpo; }
+  aviso(`${q.nome} saiu da partida.`);
+  if (estado === 'sala') renderPainel();
+  if (estado === 'noite' && jogadores.every(o => o.caido)) fim('morte');
+}
+
+function receberDoConvidado(id, d) {
+  const q = conexoes.get(id);
+  if (!q || !d || d.t !== 'in') return;
+  if (typeof d.n === 'string') {
+    const nome = limparNome(d.n);
+    if (nome !== q.nome) {
+      const primeiro = !q.apresentado;
+      q.nome = nome; q.apresentado = true;
+      if (estado === 'sala') renderPainel(); else if (primeiro) aviso(`${nome} entrou na partida.`);
+    }
+    q.apresentado = true;
+  }
+  if (!q.caido && Number.isFinite(d.x) && Number.isFinite(d.y)) {
+    q.x = d.x; q.y = d.y; prender(q);
+    q.dir = Number.isFinite(d.dir) ? d.dir : 0; q.andando = !!d.an;
+  }
+  q.segurando = !!d.seg;
+  if (Number.isInteger(d.a) && d.a > q.acaoSeq) { const n = Math.min(3, d.a - q.acaoSeq); q.acaoSeq = d.a; for (let k = 0; k < n; k++) acaoPress(q); }
+  if (Number.isInteger(d.l) && d.l > q.lampSeq) { q.lampSeq = d.l; colocarLampiao(q); }
+  if (Array.isArray(d.c) && Number.isInteger(d.c[0]) && d.c[0] > q.compraSeq) {
+    q.compraSeq = d.c[0];
+    if (estado === 'loja' && (d.c[1] === 'ferramenta' || d.c[1] === 'lampiao')) comprar(d.c[1]);
+  }
+}
+
+const r2 = v => Math.round(v * 100) / 100;
+function fotoMundo() {
+  return {
+    t: 'mundo', estado: estado === 'pausa' ? estadoPausado : estado, dia, dinheiro, meta, relogio: Math.round(relogio * 10) / 10,
+    nivelFerr, dono, estoque, tipoFim, stats, codigo: codigoSala, fila, lampioes,
+    covas: covas.map(c => (c.prof || c.corpo)
+      ? [r2(c.prof), c.corpo, c.fechada ? 1 : 0, r2(c.fechar), c.enfeite, c.levantou ? 1 : 0, c.levantarEm != null && c.levantarEm < 2.2 ? 1 : 0, c.pago ? 1 : 0]
+      : 0),
+    inimigos: inimigos.filter(e => !e.remover).map(e => [e.id, e.tipo, e.especie || '', Math.round(e.x), Math.round(e.y), e.r, e.vida, e.estado || '', r2(e.prog || 0), e.saque || 0, r2(e.dir), e.flash > 0 ? 1 : 0]),
+    jogadores: jogadores.map(q => [q.id, q.nome, q.cor, Math.round(q.x), Math.round(q.y), r2(q.dir), q.carrega, q.vida, q.caido ? 1 : 0, q.golpe > 0 ? 1 : 0, q.trabalhando ? 1 : 0, q.andando ? 1 : 0, q.inv > 0 ? 1 : 0]),
+    ev: eventos,
+  };
+}
+
+function enviarMundo() {
+  if (modo !== 'anfitriao') return;
+  if (!conexoes.size) { eventos = []; return; }
+  const agora = performance.now();
+  if (agora - ultimoMundo < 66) return;
+  ultimoMundo = agora;
+  const m = fotoMundo();
+  eventos = [];
+  conexoes.forEach(q => { if (q.conn && q.conn.open) { try { q.conn.send(m); } catch (e) { /* conexão caindo */ } } });
+}
+
+async function entrarSala(codigo) {
+  codigo = String(codigo).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+  if (codigo.length !== 4) { avisoLocal('O código da sala tem 4 letras.'); return; }
+  estado = 'conexao';
+  mostrarMensagem('Entrando', `Procurando a sala ${codigo}.`);
+  try { await carregarPeer(); } catch (e) { erroRede('Não deu para carregar o multiplayer. Confira a internet e tente de novo.'); return; }
+  const este = peer = new Peer();
+  const limite = setTimeout(() => { if (peer === este && modo !== 'convidado') erroRede(`Não achei a sala ${codigo}. Confira o código ou peça um link novo.`); }, 15000);
+  este.on('open', () => {
+    const conn = este.connect(PREFIXO + codigo, { serialization: 'json', reliable: true });
+    conn.on('open', () => { conexaoAnfitriao = conn; codigoSala = codigo; enviarEntrada(true); });
+    conn.on('data', d => {
+      if (!d || peer !== este) return;
+      if (d.t === 'bem') {
+        clearTimeout(limite);
+        modo = 'convidado'; p.id = d.id; jogadores = [p]; assinatura = '';
+        estado = 'sala'; renderPainel();
+      } else if (d.t === 'cheia') {
+        clearTimeout(limite); erroRede('Essa sala já está com 4 coveiros.');
+      } else if (d.t === 'mundo' && modo === 'convidado') aplicarMundo(d);
+    });
+    conn.on('close', () => { if (peer === este && modo === 'convidado') { modo = 'solo'; estado = 'conexao'; mostrarMensagem('O anfitrião saiu', 'A partida acabou porque quem criou a sala saiu ou perdeu a conexão.', 'Voltar ao início'); } });
+  });
+  este.on('error', e => {
+    if (peer !== este) return;
+    if (modo === 'convidado') { avisoLocal('Instabilidade na conexão (' + e.type + ').'); return; }
+    clearTimeout(limite);
+    erroRede(e.type === 'peer-unavailable' ? `Não achei a sala ${codigo}. Confira o código ou peça um link novo.` : `Não deu para conectar (${e.type}). Tente de novo.`);
+  });
+}
+
+function enviarEntrada(ja) {
+  if (!conexaoAnfitriao || !conexaoAnfitriao.open) return;
+  const agora = performance.now();
+  if (!ja && agora - ultimoEnvio < 50) return;
+  ultimoEnvio = agora;
+  try {
+    conexaoAnfitriao.send({ t: 'in', n: p.nome, x: Math.round(p.x), y: Math.round(p.y), dir: r2(p.dir), an: p.andando ? 1 : 0, seg: segurando() ? 1 : 0, a: p.acaoSeq, l: p.lampSeq, c: [p.compraSeq, p.compraItem] });
+  } catch (e) { /* conexão caindo */ }
+}
+
+function aplicarMundo(m) {
+  const antes = estado;
+  estado = m.estado; dia = m.dia; dinheiro = m.dinheiro; meta = m.meta; relogio = m.relogio;
+  nivelFerr = m.nivelFerr; dono = m.dono; estoque = m.estoque; tipoFim = m.tipoFim; stats = m.stats; codigoSala = m.codigo;
+  fila = m.fila; lampioes = m.lampioes;
+  m.covas.forEach((v, i) => {
+    const c = covas[i];
+    if (!c) return;
+    if (!v) { Object.assign(c, { prof: 0, corpo: null, fechada: false, fechar: 0, enfeite: null, levantou: false, levantarEm: null, pago: false }); return; }
+    Object.assign(c, { prof: v[0], corpo: v[1], fechada: !!v[2], fechar: v[3], enfeite: v[4], levantou: !!v[5], levantarEm: v[6] ? 1 : null, pago: !!v[7] });
+  });
+  const velhos = new Map(inimigos.map(e => [e.id, e]));
+  inimigos = m.inimigos.map(v => {
+    const e = velhos.get(v[0]) || { x: v[3], y: v[4] };
+    return Object.assign(e, { id: v[0], tipo: v[1], especie: v[2], alvoX: v[3], alvoY: v[4], r: v[5], vida: v[6], estado: v[7], prog: v[8], saque: v[9], dir: v[10], flash: v[11] ? .1 : 0 });
+  });
+  const velhosJ = new Map(jogadores.map(q => [q.id, q]));
+  const comecou = (antes === 'sala' || antes === 'fim') && estado === 'dia';
+  jogadores = m.jogadores.map(v => {
+    const eu = v[0] === p.id;
+    if (eu && comecou) { p.x = v[3]; p.y = v[4]; }
+    const q = eu ? p : (velhosJ.get(v[0]) || Object.assign(novoJogador(v[0], v[1], v[2]), { x: v[3], y: v[4] }));
+    Object.assign(q, { cor: corSegura(v[2]), carrega: v[6], vida: v[7], caido: !!v[8], golpe: v[9] ? .1 : 0, trabalhando: !!v[10], inv: v[12] ? .5 : 0 });
+    if (!eu) Object.assign(q, { nome: limparNome(v[1]), alvoX: v[3], alvoY: v[4], dir: v[5], andando: !!v[11] });
+    return q;
+  });
+  if (!jogadores.includes(p)) jogadores.push(p);
+  (m.ev || []).forEach(ev => {
+    if (ev.para && ev.para !== p.id) return;
+    if (ev.exceto && ev.exceto === p.id) return;
+    if (ev.f) flutuantes.push({ x: ev.f[0], y: ev.f[1], txt: String(ev.f[2]), cor: corSegura(ev.f[3]), t: 0 });
+    if (ev.a) avisoLocal(String(ev.a));
+    if (ev.tr && !reduzMov) tremor = Math.max(tremor, +ev.tr || 0);
+  });
+  if (antes !== estado && (antes === 'dia' || antes === 'noite')) soltar();
+  const sig = [estado, dia, dinheiro, nivelFerr, estoque, tipoFim, stats.ganho, stats.roubado, stats.recuperado, jogadores.map(q => q.nome + q.cor).join(',')].join('|');
+  if (sig === assinatura) return;
+  assinatura = sig;
+  if (estado === 'dia' || estado === 'noite') { if (!$('#painel').hidden) esconderPainel(); }
+  else renderPainel();
+}
+
+function suavizar(dt) {
+  const k = Math.min(1, dt * 12);
+  const aproxima = o => {
+    if (o.alvoX == null) return;
+    if (Math.hypot(o.alvoX - o.x, o.alvoY - o.y) > 90) { o.x = o.alvoX; o.y = o.alvoY; return; }
+    o.x += (o.alvoX - o.x) * k; o.y += (o.alvoY - o.y) * k;
+  };
+  inimigos.forEach(aproxima);
+  jogadores.forEach(q => { if (q !== p) aproxima(q); });
+}
+
+function copiarLink() {
+  const b = $('[data-acao=copiar]');
+  const selecionar = () => {
+    const el = $('#link-sala');
+    if (!el) return;
+    const r = document.createRange(); r.selectNodeContents(el);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    if (b) b.textContent = 'Selecionado. Copie com Ctrl+C';
+  };
+  try { navigator.clipboard.writeText(linkSala()).then(() => { if (b) b.textContent = 'Link copiado'; }, selecionar); }
+  catch (e) { selecionar(); }
+}
+
+// ===== Desenho =====
+function rr(x, y, w, h, r) {
+  ctx.beginPath();
+  if (ctx.roundRect) { ctx.roundRect(x, y, w, h, r); return; }
+  r = Math.min(r, w / 2, h / 2);
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+function circulo(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); }
+function sombra(x, y, rx, ry) { ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, TAU); ctx.fill(); }
+function contorno(w) { ctx.strokeStyle = COR.tinta; ctx.lineWidth = w; ctx.stroke(); }
+function texto(s, x, y, tam, cor, peso = 600) {
+  ctx.font = `${peso} ${tam}px Fredoka, "Segoe UI", sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  ctx.lineWidth = 3.5; ctx.strokeStyle = COR.tinta; ctx.strokeText(s, x, y);
+  ctx.fillStyle = cor; ctx.fillText(s, x, y);
+}
+
+function assarChao() {
+  const c = document.createElement('canvas'); c.width = W * 2; c.height = H * 2;
+  const g = c.getContext('2d'); g.scale(2, 2);
+  const rng = mulberry(11);
+  g.fillStyle = '#5b7a42'; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 240; i++) {
+    g.fillStyle = rng() < .5 ? 'rgba(138,168,92,.16)' : 'rgba(36,58,28,.16)';
+    g.beginPath(); g.ellipse(rng() * W, rng() * H, 12 + rng() * 44, 8 + rng() * 26, rng() * 3, 0, TAU); g.fill();
+  }
+  g.fillStyle = 'rgba(139,106,70,.78)';
+  g.fillRect(170, 34, 30, H - 34);
+  g.fillRect(170, 204, W - 170, 22);
+  g.fillRect(170, 354, W - 170, 22);
+  g.fillStyle = 'rgba(60,42,26,.35)';
+  for (let i = 0; i < 170; i++) {
+    const vertical = rng() < .3;
+    const x = vertical ? 170 + rng() * 30 : 170 + rng() * (W - 170);
+    const y = vertical ? 34 + rng() * (H - 34) : (rng() < .5 ? 204 : 354) + rng() * 22;
+    g.beginPath(); g.arc(x, y, .8 + rng() * 1.6, 0, TAU); g.fill();
+  }
+  g.strokeStyle = 'rgba(32,52,26,.55)'; g.lineWidth = 1.3; g.lineCap = 'round';
+  for (let i = 0; i < 380; i++) {
+    const x = rng() * W, y = 42 + rng() * (H - 42);
+    if (x > 164 && x < 206) continue;
+    if (x > 164 && ((y > 198 && y < 232) || (y > 348 && y < 382))) continue;
+    g.beginPath(); g.moveTo(x - 3, y - 4); g.lineTo(x, y); g.lineTo(x + 3, y - 5); g.moveTo(x, y); g.lineTo(x, y - 6); g.stroke();
+  }
+  g.fillStyle = '#4a4453'; g.fillRect(0, 0, W, 34);
+  g.strokeStyle = 'rgba(22,19,28,.55)'; g.lineWidth = 1.5;
+  for (let row = 0; row < 2; row++) for (let x = row ? -18 : 0; x < W; x += 36) g.strokeRect(x + .5, row * 15 + 2.5, 36, 15);
+  g.fillStyle = '#3a3542'; g.fillRect(0, 32, W, 4);
+  g.fillStyle = '#2a2531'; g.fillRect(58, 0, 76, 36);
+  g.strokeStyle = '#16131c'; g.lineWidth = 2;
+  for (let x = 62; x < 134; x += 8) { g.beginPath(); g.moveTo(x, 2); g.lineTo(x, 36); g.stroke(); }
+  return c;
+}
+const chao = assarChao();
+const luz = document.createElement('canvas'); luz.width = W; luz.height = H;
+const lg = luz.getContext('2d');
+
+function desenharAreas() {
+  AREAS.forEach((a, i) => {
+    if (dono[i]) { rr(a.x, a.y, a.w, a.h, 12); ctx.strokeStyle = 'rgba(22,19,28,.2)'; ctx.lineWidth = 2; ctx.stroke(); return; }
+    rr(a.x, a.y, a.w, a.h, 12); ctx.fillStyle = 'rgba(16,13,20,.42)'; ctx.fill();
+    ctx.setLineDash([10, 8]); rr(a.x + 4, a.y + 4, a.w - 8, a.h - 8, 10);
+    ctx.strokeStyle = COR.madeiraEsc; ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]);
+    const cx = a.x + a.w / 2, cy = a.y + a.h / 2;
+    ctx.fillStyle = COR.tinta; ctx.fillRect(cx - 3, cy + 10, 6, 34);
+    rr(cx - 52, cy - 30, 104, 48, 6); ctx.fillStyle = COR.madeira; ctx.fill(); contorno(2.5);
+    texto('À venda', cx, cy - 13, 13, COR.osso, 500);
+    texto(`$${CFG.precoTerreno[i]}`, cx, cy + 6, 19, COR.ambar, 700);
+  });
+}
+
+function desenharRosa(x, y, s = 1) {
+  ctx.strokeStyle = '#3f6b2c'; ctx.lineWidth = 2 * s; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x, y + 8 * s); ctx.lineTo(x, y); ctx.stroke();
+  ctx.fillStyle = '#4f8a36'; ctx.beginPath(); ctx.ellipse(x + 3 * s, y + 5 * s, 3 * s, 1.6 * s, -.5, 0, TAU); ctx.fill();
+  circulo(x, y - s, 4.6 * s); ctx.fillStyle = '#c8323c'; ctx.fill(); contorno(1.4);
+  ctx.strokeStyle = '#8e1d27'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(x, y - s, 2.2 * s, .5, 4.5); ctx.stroke();
+}
+
+function desenharVela(x, y, s = 1) {
+  rr(x - 3 * s, y - 5 * s, 6 * s, 12 * s, 1.5 * s); ctx.fillStyle = '#f3ecd9'; ctx.fill(); contorno(1.4);
+  const f = 1 + Math.sin(tempo * 18 + x) * .12;
+  ctx.fillStyle = COR.ambar; ctx.beginPath(); ctx.ellipse(x, y - 9 * s, 2.4 * s, 4 * s * f, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#fff3c4'; ctx.beginPath(); ctx.ellipse(x, y - 8.4 * s, 1 * s, 2 * s * f, 0, 0, TAU); ctx.fill();
+}
+
+function desenharCorpo(x, y, especie, ang = 0, s = 1) {
+  const og = especie === 'ogro', w = (og ? 80 : 64) * s, h = (og ? 30 : 22) * s;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+  rr(-w / 2 + 3, -h / 2 + 4, w, h, h / 2); ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fill();
+  rr(-w / 2, -h / 2, w, h, h / 2); ctx.fillStyle = COR.mortalha; ctx.fill(); contorno(2.2);
+  ctx.strokeStyle = 'rgba(22,19,28,.35)'; ctx.lineWidth = 1.5;
+  for (let i = 1; i <= 3; i++) {
+    const bx = -w / 2 + w * (.28 + i * .17);
+    ctx.beginPath(); ctx.moveTo(bx, -h / 2 + 2); ctx.lineTo(bx - 4 * s, h / 2 - 2); ctx.stroke();
+  }
+  const rx = -w / 2 + h * .55, rr_ = h * .38;
+  circulo(rx, 0, rr_); ctx.fillStyle = og ? '#8aa65e' : '#dcc7a4'; ctx.fill(); contorno(1.8);
+  ctx.strokeStyle = COR.tinta; ctx.lineWidth = 1.3;
+  [-1, 1].forEach(sg => {
+    const ex = rx + rr_ * .25, ey = sg * rr_ * .42, k = rr_ * .22;
+    ctx.beginPath(); ctx.moveTo(ex - k, ey - k); ctx.lineTo(ex + k, ey + k); ctx.moveTo(ex + k, ey - k); ctx.lineTo(ex - k, ey + k); ctx.stroke();
+  });
+  if (og) {
+    ctx.fillStyle = COR.osso;
+    [-1, 1].forEach(sg => { ctx.beginPath(); ctx.moveTo(rx + rr_ * .7, sg * rr_ * .25); ctx.lineTo(rx + rr_ * 1.25, sg * rr_ * .35); ctx.lineTo(rx + rr_ * .7, sg * rr_ * .55); ctx.closePath(); ctx.fill(); });
+  }
+  ctx.restore();
+}
+
+function balao(x, y, item) {
+  y += Math.sin(tempo * 3 + x) * 1.5;
+  ctx.fillStyle = COR.osso;
+  ctx.beginPath(); ctx.moveTo(x - 5, y - 6); ctx.lineTo(x - 8, y + 3); ctx.lineTo(x + 2, y - 6); ctx.closePath(); ctx.fill(); contorno(2);
+  rr(x - 12, y - 28, 24, 23, 7); ctx.fill(); contorno(2);
+  if (item === 'rosa') desenharRosa(x, y - 18, .85); else desenharVela(x, y - 14, .8);
+}
+
+function desenharCova(c) {
+  let x = c.x, y = c.y;
+  if (c.levantarEm != null && c.levantarEm < 2.2) { x += rnd(-2, 2); y += rnd(-1.5, 1.5); }
+  const l = x - c.w / 2, t = y - c.h / 2;
+  if (!c.corpo && c.prof <= 0) {
+    ctx.setLineDash([5, 5]); rr(l, t, c.w, c.h, 6);
+    ctx.strokeStyle = 'rgba(22,19,28,.28)'; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
+    return;
+  }
+  if (c.fechada && c.corpo) {
+    rr(l + 3, t + 10, c.w - 6, c.h - 12, 12); ctx.fillStyle = COR.monte; ctx.fill(); contorno(2.5);
+    rr(l + 8, t + 15, c.w - 16, 8, 4); ctx.fillStyle = 'rgba(255,230,200,.1)'; ctx.fill();
+    const og = c.corpo.especie === 'ogro', lw = og ? 32 : 26;
+    ctx.beginPath();
+    ctx.moveTo(x - lw / 2, t + 14); ctx.lineTo(x - lw / 2, t - 4);
+    ctx.arc(x, t - 4, lw / 2, Math.PI, 0); ctx.lineTo(x + lw / 2, t + 14); ctx.closePath();
+    ctx.fillStyle = og ? COR.pedraOgro : COR.pedra; ctx.fill(); contorno(2.5);
+    ctx.strokeStyle = 'rgba(22,19,28,.55)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, t - 10); ctx.lineTo(x, t + 8); ctx.moveTo(x - 5, t - 4); ctx.lineTo(x + 5, t - 4); ctx.stroke();
+    if (c.enfeite === 'rosa') desenharRosa(x, y + c.h / 2 - 14, 1.1);
+    else if (c.enfeite === 'vela') desenharVela(x, y + c.h / 2 - 12, 1.1);
+    return;
+  }
+  const k = Math.min(1, c.prof);
+  ctx.fillStyle = COR.terra;
+  ctx.beginPath(); ctx.ellipse(x + c.w / 2 + 5, y + 8, 6 + c.prof * 4, 10 + c.prof * 8, 0, 0, TAU); ctx.fill(); contorno(2);
+  const hw = c.w * (.5 + .5 * k), hh = c.h * (.5 + .5 * k);
+  rr(x - hw / 2, y - hh / 2, hw, hh, 5);
+  ctx.fillStyle = COR.buraco[c.prof >= 2 ? 2 : c.prof >= 1 ? 1 : 0]; ctx.fill(); contorno(2.5);
+  if (c.corpo && !c.levantou) {
+    const og = c.corpo.especie === 'ogro';
+    desenharCorpo(x, y, c.corpo.especie, Math.PI / 2, og ? .76 : .84);
+    if (c.fechar > 0) {
+      rr(x - hw / 2, y - hh / 2, hw, hh, 5);
+      ctx.fillStyle = `rgba(110,74,43,${Math.min(1, c.fechar * 1.1)})`; ctx.fill();
+    }
+  }
+  if (c.levantou) {
+    ctx.fillStyle = COR.terra;
+    [[-14, -30], [16, -26], [-18, 26], [12, 34]].forEach(([dx, dy]) => { circulo(x + dx, y + dy, 4); ctx.fill(); });
+  }
+}
+
+function desenharCarroca() {
+  ctx.fillStyle = COR.tinta;
+  [[40, 150], [40, 340], [152, 150], [152, 340]].forEach(([x, y]) => { rr(x - 7, y - 20, 14, 40, 5); ctx.fill(); });
+  rr(50, 100, 104, 300, 10); ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fill();
+  rr(44, 94, 104, 300, 10); ctx.fillStyle = COR.madeira; ctx.fill(); contorno(3);
+  ctx.strokeStyle = 'rgba(22,19,28,.25)'; ctx.lineWidth = 1.5;
+  for (let yy = 118; yy < 390; yy += 24) { ctx.beginPath(); ctx.moveTo(50, yy); ctx.lineTo(142, yy); ctx.stroke(); }
+  texto('Carroça', 96, 76, 13, COR.osso, 600);
+}
+
+function desenharEstandes() {
+  const r = ESTANDES[0];
+  const moitas = [[-10, 4, 14], [9, 2, 15], [0, -8, 14], [-2, 9, 13]];
+  moitas.forEach(([dx, dy, rad]) => { circulo(r.x + dx, r.y + dy, rad); contorno(5); });
+  ctx.fillStyle = '#3f6b2c';
+  moitas.forEach(([dx, dy, rad]) => { circulo(r.x + dx, r.y + dy, rad); ctx.fill(); });
+  [[-12, 0], [5, -11], [11, 6], [-4, 11], [-1, -2]].forEach(([dx, dy]) => {
+    circulo(r.x + dx, r.y + dy, 4.2); ctx.fillStyle = '#c8323c'; ctx.fill(); contorno(1.3);
+  });
+  texto('Rosas', r.x, r.y + 30, 12, COR.osso, 600);
+  const v = ESTANDES[1];
+  rr(v.x - 22, v.y - 12, 44, 30, 4); ctx.fillStyle = COR.madeira; ctx.fill(); contorno(2.5);
+  ctx.strokeStyle = 'rgba(22,19,28,.3)'; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.moveTo(v.x - 20, v.y + 3); ctx.lineTo(v.x + 20, v.y + 3); ctx.stroke();
+  [-11, 0, 11].forEach(dx => desenharVela(v.x + dx, v.y - 8, 1));
+  texto('Velas', v.x, v.y + 30, 12, COR.osso, 600);
+}
+
+function desenharLampiao(l) {
+  sombra(l.x, l.y + 2, 8, 3);
+  ctx.strokeStyle = COR.tinta; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(l.x, l.y); ctx.lineTo(l.x, l.y - 28); ctx.stroke();
+  rr(l.x - 6, l.y - 40, 12, 14, 3); ctx.fillStyle = COR.ambar; ctx.fill(); contorno(2);
+  ctx.fillStyle = COR.tinta; ctx.beginPath(); ctx.moveTo(l.x - 8, l.y - 40); ctx.lineTo(l.x + 8, l.y - 40); ctx.lineTo(l.x, l.y - 47); ctx.closePath(); ctx.fill();
+}
+
+function desenharFerramenta(x, y, ang, nivel) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.lineCap = 'round';
+  if (nivel === 1) {
+    ctx.strokeStyle = COR.madeiraEsc; ctx.lineWidth = 3.5;
+    ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(28, 0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(26, -6); ctx.lineTo(37, -5); ctx.quadraticCurveTo(43, 0, 37, 5); ctx.lineTo(26, 6); ctx.closePath();
+    ctx.fillStyle = '#b3b0bd'; ctx.fill(); contorno(1.8);
+  } else {
+    ctx.strokeStyle = COR.madeiraEsc; ctx.lineWidth = 3;
+    [-3, 3].forEach(o => { ctx.beginPath(); ctx.moveTo(4, o); ctx.lineTo(28, o * .4); ctx.stroke(); });
+    ctx.fillStyle = '#b3b0bd';
+    [-1, 1].forEach(sg => { ctx.beginPath(); ctx.ellipse(33, sg * 3.5, 6, 3.5, 0, 0, TAU); ctx.fill(); contorno(1.8); });
+  }
+  ctx.restore();
+}
+
+function desenharEscavadeira(q) {
+  const x = q.x, y = q.y;
+  ctx.fillStyle = COR.tinta;
+  rr(x - 22, y - 16, 44, 8, 3); ctx.fill(); rr(x - 22, y + 12, 44, 8, 3); ctx.fill();
+  rr(x - 18, y - 12, 36, 28, 5); ctx.fillStyle = '#e0a526'; ctx.fill(); contorno(2.5);
+  const a = q.dir + (q.trabalhando ? Math.sin(tempo * 10) * .3 : 0);
+  ctx.save(); ctx.translate(x, y); ctx.rotate(a);
+  rr(8, -3.5, 26, 7, 3); ctx.fillStyle = '#e0a526'; ctx.fill(); contorno(2);
+  ctx.beginPath(); ctx.moveTo(32, -8); ctx.lineTo(42, -6); ctx.lineTo(42, 6); ctx.lineTo(32, 8); ctx.closePath();
+  ctx.fillStyle = '#6d6a77'; ctx.fill(); contorno(2);
+  ctx.restore();
+}
+
+function desenharFantasma(q) {
+  const x = q.x, y = q.y - 8 + Math.sin(tempo * 2.4 + x) * 3;
+  ctx.save(); ctx.globalAlpha = .6;
+  ctx.beginPath(); ctx.arc(x, y - 4, 12, Math.PI, 0); ctx.lineTo(x + 12, y + 12);
+  for (let k = 0; k < 4; k++) ctx.quadraticCurveTo(x + 9 - k * 6, y + 6, x + 6 - k * 6, y + 12);
+  ctx.closePath(); ctx.fillStyle = COR.osso; ctx.fill(); contorno(2);
+  ctx.fillStyle = COR.tinta;
+  circulo(x - 4, y - 3, 1.8); ctx.fill();
+  circulo(x + 4, y - 3, 1.8); ctx.fill();
+  ctx.restore();
+}
+
+function desenharCoveiro(q) {
+  if (q.caido) { desenharFantasma(q); return; }
+  const x = q.x, y = q.y, nivel = nivelFerr;
+  const bob = q.andando ? Math.sin(tempo * 16 + x * .01) * 1.4 : 0;
+  ctx.save();
+  if (q.inv > 0 && Math.floor(tempo * 20) % 2) ctx.globalAlpha = .45;
+  sombra(x, y + 13, 15, 5);
+  if (nivel === 3) desenharEscavadeira(q);
+  const balanco = q.trabalhando ? Math.sin(tempo * 14) * .6 : 0;
+  if (nivel === 1 || nivel === 2) desenharFerramenta(x, y + bob, q.dir + .9 + balanco, nivel);
+  ctx.beginPath(); ctx.ellipse(x, y + 2 + bob * .3, 13, 12, 0, 0, TAU); ctx.fillStyle = corSegura(q.cor); ctx.fill(); contorno(2.5);
+  const hx = x + Math.cos(q.dir) * 2, hy = y - 7 + bob;
+  circulo(hx, hy, 8.5); ctx.fillStyle = '#e8c49a'; ctx.fill(); contorno(2.2);
+  ctx.fillStyle = COR.tinta;
+  const ox = Math.cos(q.dir) * 3;
+  circulo(hx - 3 + ox, hy + 2, 1.3); ctx.fill();
+  circulo(hx + 3 + ox, hy + 2, 1.3); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(hx, hy - 4, 12, 4.5, 0, 0, TAU); ctx.fillStyle = '#231e2b'; ctx.fill(); contorno(2);
+  rr(hx - 6.5, hy - 14, 13, 10, 3); ctx.fillStyle = '#231e2b'; ctx.fill(); contorno(2);
+  const leva = q.carrega;
+  if (leva && leva.tipo === 'corpo') desenharCorpo(x, y - 28 + bob, leva.corpo.especie, 0, .72);
+  else if (leva && leva.tipo === 'item') {
+    const ix = x + Math.cos(q.dir) * 16, iy = y + Math.sin(q.dir) * 10 + 2;
+    if (leva.item === 'rosa') desenharRosa(ix, iy, 1.1); else desenharVela(ix, iy, 1.1);
+  }
+  if (q.golpe > 0) {
+    ctx.strokeStyle = `rgba(239,230,210,${Math.min(1, q.golpe / .16 + .2)})`; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(x, y, 36, q.dir - .9, q.dir + .9); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function desenharZumbi(e) {
+  const og = e.especie === 'ogro', r = e.r, sway = Math.sin(tempo * 6 + e.x * .1) * 1.5;
+  const pele = og ? '#6f8f4c' : '#8aa47a';
+  sombra(e.x, e.y + r * .9, r, r * .35);
+  ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(e.dir); ctx.lineCap = 'round';
+  [[og ? 9 : 7, COR.tinta], [og ? 6 : 4.5, pele]].forEach(([lw, cor]) => {
+    ctx.strokeStyle = cor; ctx.lineWidth = lw;
+    [-1, 1].forEach(sg => { ctx.beginPath(); ctx.moveTo(0, sg * r * .55); ctx.lineTo(r + 9, sg * r * .5 + sway); ctx.stroke(); });
+  });
+  ctx.restore();
+  circulo(e.x, e.y, r); ctx.fillStyle = COR.mortalha; ctx.fill(); contorno(2.5);
+  ctx.strokeStyle = 'rgba(22,19,28,.35)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(e.x - r * .7, e.y + r * .2); ctx.lineTo(e.x + r * .6, e.y + r * .5); ctx.stroke();
+  const hx = e.x + Math.cos(e.dir) * r * .25, hy = e.y - r * .35;
+  circulo(hx, hy, r * .62); ctx.fillStyle = pele; ctx.fill(); contorno(2.2);
+  ctx.fillStyle = '#e9e36a';
+  const ox = Math.cos(e.dir) * r * .15;
+  circulo(hx - r * .22 + ox, hy + r * .05, og ? 2.6 : 2); ctx.fill();
+  circulo(hx + r * .22 + ox, hy + r * .05, og ? 2.6 : 2); ctx.fill();
+  if (og) {
+    ctx.fillStyle = COR.osso;
+    [-1, 1].forEach(sg => { ctx.beginPath(); ctx.moveTo(hx + sg * r * .2, hy + r * .3); ctx.lineTo(hx + sg * r * .28, hy + r * .62); ctx.lineTo(hx + sg * r * .08, hy + r * .36); ctx.closePath(); ctx.fill(); });
+  }
+  if (e.flash > 0) { circulo(e.x, e.y, r + 2); ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fill(); }
+}
+
+function desenharLadrao(e) {
+  const r = e.r;
+  sombra(e.x, e.y + r * .9, r, r * .35);
+  const sacoR = e.saque > 0 ? 9 : 6;
+  const sx = e.x - Math.cos(e.dir) * 12, sy = e.y - Math.sin(e.dir) * 12 - 2;
+  circulo(sx, sy, sacoR); ctx.fillStyle = '#9b7a4a'; ctx.fill(); contorno(2);
+  if (e.saque > 0) texto('$', sx, sy + 1, 11, COR.ambar, 700);
+  ctx.save(); circulo(e.x, e.y, r); ctx.clip();
+  ctx.fillStyle = '#ece5d3'; ctx.fillRect(e.x - r, e.y - r, 2 * r, 2 * r);
+  ctx.fillStyle = '#1b1820';
+  for (let yy = -r; yy < r; yy += 6) ctx.fillRect(e.x - r, e.y + yy, 2 * r, 3);
+  ctx.restore();
+  circulo(e.x, e.y, r); contorno(2.5);
+  const hx = e.x + Math.cos(e.dir) * 2, hy = e.y - 7;
+  circulo(hx, hy, 8); ctx.fillStyle = '#d9b08a'; ctx.fill(); contorno(2);
+  ctx.fillStyle = '#1b1820'; ctx.beginPath(); ctx.arc(hx, hy - 1, 8.4, Math.PI, 0); ctx.fill();
+  rr(hx - 8.5, hy - 1, 17, 5, 2.5); ctx.fillStyle = '#1b1820'; ctx.fill();
+  ctx.fillStyle = COR.osso;
+  circulo(hx - 3, hy + 1.5, 1.4); ctx.fill();
+  circulo(hx + 3, hy + 1.5, 1.4); ctx.fill();
+  if (e.flash > 0) { circulo(e.x, e.y, r + 2); ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fill(); }
+}
+
+function barra(x, y, frac, cor, marca) {
+  rr(x - 22, y - 4, 44, 8, 4); ctx.fillStyle = COR.tinta; ctx.fill();
+  const w = 40 * Math.max(0, Math.min(1, frac));
+  if (w > 0) { rr(x - 20, y - 2, w, 4, 2); ctx.fillStyle = cor; ctx.fill(); }
+  if (marca) { ctx.fillStyle = COR.osso; ctx.fillRect(x - 20 + 40 * marca - 1, y - 5, 2, 10); }
+}
+
+function furo(x, y, r, forca) {
+  const g = lg.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, `rgba(0,0,0,${forca})`);
+  g.addColorStop(.65, `rgba(0,0,0,${forca * .75})`);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  lg.fillStyle = g; lg.beginPath(); lg.arc(x, y, r, 0, TAU); lg.fill();
+}
+
+function desenharEscuro() {
+  if (escuro < .01) return;
+  lg.globalCompositeOperation = 'source-over';
+  lg.clearRect(0, 0, W, H);
+  lg.fillStyle = `rgba(10,12,34,${escuro})`; lg.fillRect(0, 0, W, H);
+  lg.globalCompositeOperation = 'destination-out';
+  jogadores.forEach(q => furo(q.x, q.y, q.caido ? 60 : 120, q.caido ? .5 : .92));
+  lampioes.forEach(l => furo(l.x, l.y - 12, CFG.raioLampiao + 22, 1));
+  covas.forEach(c => { if (c.fechada && c.enfeite === 'vela') furo(c.x, c.y + c.h / 2 - 20, 42, .8); });
+  furo(ESTANDES[1].x, ESTANDES[1].y - 8, 46, .8);
+  ctx.drawImage(luz, 0, 0, W, H);
+  if (escuro > .3) {
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    lampioes.forEach(l => {
+      const g = ctx.createRadialGradient(l.x, l.y - 34, 0, l.x, l.y - 34, 70);
+      g.addColorStop(0, 'rgba(242,181,68,.28)'); g.addColorStop(1, 'rgba(242,181,68,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(l.x, l.y - 34, 70, 0, TAU); ctx.fill();
+    });
+    ctx.restore();
+  }
+}
+
+function desenharAlvo(a) {
+  ctx.strokeStyle = 'rgba(242,181,68,.9)'; ctx.lineWidth = 2;
+  ctx.setLineDash([6, 5]); ctx.lineDashOffset = -tempo * 20;
+  if (a.tipo === 'cova') { const c = a.cova; rr(c.x - c.w / 2 - 6, c.y - c.h / 2 - 16, c.w + 12, c.h + 22, 9); ctx.stroke(); }
+  else if (a.tipo === 'placa') { const ar = AREAS[a.area]; rr(ar.x + ar.w / 2 - 62, ar.y + ar.h / 2 - 40, 124, 92, 10); ctx.stroke(); }
+  else {
+    const o = a.tipo === 'slot' ? SLOTS[a.i] : ESTANDES.find(s => s.item === a.item);
+    ctx.beginPath(); ctx.arc(o.x, o.y, a.tipo === 'slot' ? 40 : 30, 0, TAU); ctx.stroke();
+  }
+  ctx.setLineDash([]); ctx.lineDashOffset = 0;
+}
+
+function desenhar() {
+  ctx.setTransform(escala * dpr, 0, 0, escala * dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  if (tremor > 0) ctx.translate(rnd(-1, 1) * tremor * 14, rnd(-1, 1) * tremor * 14);
+  ctx.drawImage(chao, 0, 0, W, H);
+  desenharAreas();
+  if (escuro < .3) lampioes.forEach(l => {
+    ctx.setLineDash([4, 6]); ctx.strokeStyle = 'rgba(242,181,68,.45)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(l.x, l.y, CFG.raioLampiao, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+  });
+  covas.forEach(c => { if (dono[c.area]) desenharCova(c); });
+  desenharCarroca();
+  fila.forEach((c, i) => { if (c) desenharCorpo(SLOTS[i].x, SLOTS[i].y, c.especie); });
+  desenharEstandes();
+  const jogando = estado === 'dia' || estado === 'noite';
+  const alvo = jogando && !p.caido ? alvoAtual(p) : null;
+  if (alvo) desenharAlvo(alvo);
+  lampioes.forEach(desenharLampiao);
+  const ents = inimigos.map(e => ({ y: e.y, f: () => (e.tipo === 'zumbi' ? desenharZumbi(e) : desenharLadrao(e)) }));
+  jogadores.forEach(q => ents.push({ y: q.y, f: () => desenharCoveiro(q) }));
+  ents.sort((a, b) => a.y - b.y).forEach(o => o.f());
+
+  desenharEscuro();
+
+  fila.forEach((c, i) => { if (c) balao(SLOTS[i].x + 44, SLOTS[i].y - 4, c.pedido); });
+  jogadores.forEach(q => { if (!q.caido && q.carrega && q.carrega.tipo === 'corpo') balao(q.x + 30, q.y - 36, q.carrega.corpo.pedido); });
+  if (modo !== 'solo') jogadores.forEach(q => { if (q !== p) texto(q.nome, q.x, q.y + 27, 11, COR.osso, 600); });
+  covas.forEach(c => {
+    if (!dono[c.area] || !c.corpo || c.levantou || c.enfeite === c.corpo.pedido) return;
+    balao(c.x + 22, c.y - c.h / 2 - 2, c.corpo.pedido);
+    if (c.levantarEm != null && c.levantarEm < 2.2) texto('!', c.x - 16, c.y - c.h / 2 - 12, 22, COR.sangue, 700);
+  });
+  if (alvo && alvo.tipo === 'cova') {
+    const c = alvo.cova, by = c.y + c.h / 2 + 10;
+    if (c.corpo && !c.fechada && !c.levantou && c.fechar > 0) barra(c.x, by, c.fechar, COR.osso);
+    else if (!c.corpo && c.prof > 0 && c.prof < 2) barra(c.x, by, c.prof / 2, COR.ambar, .5);
+  }
+  inimigos.forEach(e => { if (e.tipo === 'ladrao' && e.estado === 'roubando') barra(e.x, e.y - 28, e.prog, COR.sangue); });
+  flutuantes.forEach(f => {
+    ctx.globalAlpha = 1 - Math.max(0, (f.t - .9) / .5);
+    texto(f.txt, f.x, f.y, 15, f.cor, 700);
+    ctx.globalAlpha = 1;
+  });
+}
+
+// ===== HUD e dica =====
+const cache = {};
+function pinta(id, prop, val) {
+  const chave = id + '.' + prop;
+  if (cache[chave] === val) return;
+  cache[chave] = val;
+  const el = $('#' + id);
+  if (prop === 'width') el.style.width = val; else el[prop] = val;
+}
+const fmt = s => { s = Math.max(0, Math.ceil(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+function atualizarHUD() {
+  const fase = estado === 'pausa' ? estadoPausado : estado;
+  pinta('hud-dia', 'textContent', `Dia ${dia} de ${CFG.dias}`);
+  pinta('hud-fase', 'textContent', { dia: 'Dia', noite: 'Noite', loja: 'Anoitecer', amanhecer: 'Amanhecer', fim: 'Fim', sala: 'Sala' }[fase] || 'Dia');
+  pinta('hud-fase', 'className', 'fase ' + (fase === 'noite' || fase === 'loja' ? 'noite' : 'dia'));
+  const dur = fase === 'noite' ? CFG.duracaoNoite : CFG.duracaoDia;
+  const ativo = fase === 'dia' || fase === 'noite';
+  pinta('hud-relogio', 'textContent', ativo ? fmt(relogio) : fmt(fase === 'loja' ? CFG.duracaoNoite : CFG.duracaoDia));
+  pinta('hud-barra', 'width', (ativo ? Math.max(0, relogio / dur) * 100 : 100).toFixed(1) + '%');
+  pinta('hud-dinheiro', 'textContent', `$${dinheiro}`);
+  pinta('hud-meta', 'textContent', `de $${meta}`);
+  let v = '';
+  for (let i = 0; i < CFG.vidaMax; i++) v += i < p.vida ? '♥' : '<span class="vazio">♥</span>';
+  pinta('hud-vida', 'innerHTML', v);
+  pinta('hud-ferramenta', 'textContent', ferramenta().nome);
+  pinta('hud-lampioes', 'textContent', `Lampiões ${estoque}`);
+  pinta('hud-sala', 'hidden', modo === 'solo');
+  pinta('hud-sala', 'textContent', `Sala ${codigoSala} · ${jogadores.length} ${jogadores.length === 1 ? 'coveiro' : 'coveiros'}`);
+  pinta('dica', 'innerHTML', textoDica());
+}
+
+function textoDica() {
+  if (estado !== 'dia' && estado !== 'noite') return '';
+  if (p.caido) return 'Você caiu. Volta no amanhecer.';
+  const K = toque ? 'Ação' : 'Espaço';
+  if (inimigoPerto(p, 40)) return `<b>${K}</b>: bater`;
+  const a = alvoAtual(p), leva = p.carrega;
+  const levaTxt = leva && leva.tipo === 'corpo' ? `Levando ${esc(leva.corpo.nome)}`
+    : leva && leva.tipo === 'item' ? `Segurando ${ITEM[leva.item] || ''}` : '';
+  let acao = '';
+  if (a && a.tipo === 'slot') {
+    const c = fila[a.i];
+    if (c && !leva) acao = `<b>${K}</b>: pegar ${esc(c.nome)} (${c.especie === 'ogro' ? 'ogro' : 'humano'}, quer ${ITEM[c.pedido] || ''})`;
+    else if (c && leva) acao = 'Mãos ocupadas';
+    else if (!c && leva && leva.tipo === 'corpo') acao = `<b>${K}</b>: devolver para a carroça`;
+  } else if (a && a.tipo === 'estande') {
+    if (leva && leva.tipo === 'corpo') acao = 'Mãos ocupadas';
+    else if (leva && leva.item === a.item) acao = `<b>${K}</b>: devolver ${ITEM[a.item]}`;
+    else acao = `<b>${K}</b>: pegar ${ITEM[a.item]}`;
+  } else if (a && a.tipo === 'placa') {
+    const preco = CFG.precoTerreno[a.area];
+    acao = dinheiro >= preco ? `<b>${K}</b>: comprar este terreno por $${preco}` : `Terreno à venda por $${preco}. Faltam $${preco - dinheiro}.`;
+  } else if (a && a.tipo === 'cova') {
+    const c = a.cova;
+    if (c.levantou) acao = 'Cova vazia. O morto saiu andando.';
+    else if (!c.corpo) {
+      const req = leva && leva.tipo === 'corpo' ? CFG.profundidade[leva.corpo.especie] : 0;
+      if (req && c.prof >= req) acao = `<b>${K}</b>: colocar ${esc(leva.corpo.nome)} na cova`;
+      else if (c.prof < 2) acao = `Segure <b>${K}</b> para cavar${req === 2 ? ' (ogro precisa de cova grande)' : ''}`;
+      else acao = 'Cova grande pronta';
+    } else if (!c.fechada) acao = `Segure <b>${K}</b> para fechar a cova`;
+    else if (c.enfeite !== c.corpo.pedido) {
+      acao = leva && leva.tipo === 'item' && leva.item === c.corpo.pedido
+        ? `<b>${K}</b>: colocar ${ITEM[leva.item]}`
+        : `${esc(c.corpo.nome)} quer ${ITEM[c.corpo.pedido] || ''}. Tem no canto de baixo, à esquerda.`;
+    } else acao = `${esc(c.corpo.nome)} descansa em paz`;
+  }
+  if (!acao && !levaTxt) return estado === 'noite' ? 'Proteja as covas. Ladrão não chega perto de lampião.' : '';
+  return [levaTxt, acao].filter(Boolean).join(' · ');
+}
+
+// ===== Tela e toque =====
+function redimensionar() {
+  const r = palco.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  escala = Math.min(r.width / W, r.height / H);
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  tela.style.width = Math.floor(W * escala) + 'px';
+  tela.style.height = Math.floor(H * escala) + 'px';
+  tela.width = Math.floor(W * escala * dpr);
+  tela.height = Math.floor(H * escala * dpr);
+}
+new ResizeObserver(redimensionar).observe(palco);
+addEventListener('resize', redimensionar);
+
+if (toque) {
+  $('#toque').hidden = false;
+  const zona = $('#joy-zona'), base = $('#joy-base'), pino = $('#joy-pino');
+  let origem = null, idPtr = null;
+  zona.addEventListener('pointerdown', e => {
+    idPtr = e.pointerId; zona.setPointerCapture(idPtr);
+    const r = zona.getBoundingClientRect();
+    origem = { x: e.clientX, y: e.clientY };
+    base.style.left = (e.clientX - r.left) + 'px'; base.style.top = (e.clientY - r.top) + 'px';
+    pino.style.transform = ''; base.hidden = false;
+  });
+  zona.addEventListener('pointermove', e => {
+    if (e.pointerId !== idPtr || !origem) return;
+    let dx = e.clientX - origem.x, dy = e.clientY - origem.y;
+    const d = Math.hypot(dx, dy), m = 45;
+    if (d > m) { dx = dx / d * m; dy = dy / d * m; }
+    joy.x = dx / m; joy.y = dy / m;
+    pino.style.transform = `translate(${dx}px, ${dy}px)`;
+  });
+  const fimJoy = e => { if (e.pointerId !== idPtr) return; origem = null; idPtr = null; joy.x = 0; joy.y = 0; base.hidden = true; };
+  zona.addEventListener('pointerup', fimJoy);
+  zona.addEventListener('pointercancel', fimJoy);
+  const bA = $('#btn-acao');
+  bA.addEventListener('pointerdown', e => { e.preventDefault(); acaoToque = true; apertar(); });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(t => bA.addEventListener(t, () => { acaoToque = false; }));
+  $('#btn-lampiao').addEventListener('pointerdown', e => { e.preventDefault(); pedirLampiao(); });
+}
+
+// ===== Começo =====
+novoJogo();
+redimensionar();
+mostrarTitulo();
+let ultimo = performance.now();
+function quadro(t) {
+  const dt = Math.min(.05, Math.max(0, (t - ultimo) / 1000));
+  ultimo = t;
+  atualizar(dt);
+  enviarMundo();
+  desenhar();
+  atualizarHUD();
+  requestAnimationFrame(quadro);
+}
+requestAnimationFrame(quadro);
+})();
+</script>
+
+</html>
