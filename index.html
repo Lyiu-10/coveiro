@@ -40,8 +40,6 @@ input{-webkit-user-select:text;user-select:text}
 .chip{font-size:13px;padding:3px 10px;border:1px solid var(--linha);border-radius:999px;color:var(--osso-2)}
 #palco{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
 #tela{display:block;border-radius:10px;box-shadow:0 0 0 1px var(--linha),0 18px 50px rgba(0,0,0,.45);touch-action:none}
-#dica{height:44px;flex:none;display:flex;align-items:center;justify-content:center;overflow:hidden;text-align:center;font-size:15px;color:var(--osso-2);line-height:1.4}
-#dica b{color:var(--osso);font-weight:600}
 kbd{font-family:inherit;font-size:.85em;font-weight:600;padding:1px 6px;border-radius:5px;background:var(--tinta-3);color:var(--osso);border:1px solid var(--linha);border-bottom-width:2px}
 #aviso{position:absolute;top:12px;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);box-sizing:border-box;padding:8px 14px;border-radius:10px;background:rgba(22,19,28,.9);border:1px solid var(--linha);font-size:14px;text-align:center;pointer-events:none;z-index:4}
 #painel{position:absolute;inset:0;display:flex;overflow:auto;padding:12px;box-sizing:border-box;background:rgba(12,10,16,.5);z-index:5}
@@ -84,7 +82,7 @@ kbd{font-family:inherit;font-size:.85em;font-weight:600;padding:1px 6px;border-r
 .resumo{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;font-size:16px}
 .resumo li{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--linha);padding-bottom:6px}
 .resumo b{font-variant-numeric:tabular-nums}
-#hud.fora,#dica.fora{visibility:hidden}
+#hud.fora{visibility:hidden}
 .cartao.largo{width:min(760px,100%)}
 .loja-corpo{display:grid;grid-template-columns:10.5em minmax(0,1fr);gap:14px;align-items:start}
 .loja-abas{display:flex;flex-direction:column;gap:6px}
@@ -153,7 +151,6 @@ kbd{font-family:inherit;font-size:.85em;font-weight:600;padding:1px 6px;border-r
     </div>
     <section id="painel" hidden></section>
   </main>
-  <footer id="dica"></footer>
 </div>
 
 <script>
@@ -168,9 +165,9 @@ const CFG = {
   duracaoNoite: 60,     // teto: a noite acaba antes quando o cemitério fica limpo
   intervaloChegada: 20, // sozinho; online chega corpo mais rápido
   chanceOgro: 0.3,
-  pagamento: { humano: 12, ogro: 26 },
+  pagamento: { humano: 12, ogro: 26, goblin: 8 },
   gorjeta: 5,
-  profundidade: { humano: 1, ogro: 2 },
+  profundidade: { humano: 1, ogro: 2, goblin: 1 },
   cavarPorSeg: 0.16,
   fecharPorSeg: 0.5,
   velocidade: 165,
@@ -187,35 +184,35 @@ const CFG = {
   maxJogadores: 4,
   ferramentas: [
     { nome: 'Mãos', preco: 0, cavar: 1, dano: 1, desc: '' },
-    { nome: 'Pá', preco: 35, cavar: 2, dano: 2, desc: 'Cava e fecha no dobro da velocidade. E bate mais forte.' },
-    { nome: 'Cavadeira', preco: 90, cavar: 3, dano: 3, desc: 'Três vezes mais rápida que cavar na mão. Bate mais forte que a pá.' },
-    { nome: 'Escavadeira', preco: 180, cavar: 5, dano: 5, desc: 'Cinco vezes mais rápida. Ogro nenhum aguenta.' },
+    { nome: 'Pá', preco: 35, cavar: 2, dano: 2, desc: 'cava 2× · dano 2' },
+    { nome: 'Cavadeira', preco: 90, cavar: 3, dano: 3, desc: 'cava 3× · dano 3' },
+    { nome: 'Escavadeira', preco: 180, cavar: 5, dano: 5, desc: 'cava 5× · dano 5' },
   ],
   botas: [
     { nome: 'Botina', preco: 0, vel: 1, desc: '' },
-    { nome: 'Bota de couro', preco: 25, vel: 1.2, desc: 'Anda 20% mais rápido.' },
-    { nome: 'Bota de cano alto', preco: 60, vel: 1.4, desc: 'Anda 40% mais rápido.' },
-    { nome: 'Bota de sete léguas', preco: 120, vel: 1.65, desc: 'Anda 65% mais rápido. Atravessa o cemitério num pulo.' },
+    { nome: 'Bota de couro', preco: 25, vel: 1.2, desc: '+20% velocidade' },
+    { nome: 'Bota de cano alto', preco: 60, vel: 1.4, desc: '+40% velocidade' },
+    { nome: 'Bota de sete léguas', preco: 120, vel: 1.65, desc: '+65% velocidade' },
   ],
   // Quanto mais propaganda, mais rápido chega defunto (fator multiplica o intervalo entre um e outro)
   propaganda: [
-    { nome: 'Boca a boca', preco: 0, fator: 1, desc: '' },
-    { nome: 'Placa na estrada', preco: 30, fator: 0.8, desc: 'Chega defunto 25% mais rápido.' },
-    { nome: 'Anúncio no jornal', preco: 70, fator: 0.65, desc: 'Chega defunto 50% mais rápido.' },
-    { nome: 'Contrato com o hospital', preco: 130, fator: 0.5, desc: 'Chega defunto no dobro da velocidade.' },
+    { preco: 0, fator: 1, desc: '' },
+    { preco: 30, fator: 0.8, desc: '+25% defunto' },
+    { preco: 70, fator: 0.65, desc: '+50% defunto' },
+    { preco: 130, fator: 0.5, desc: '2× defunto' },
   ],
   // Mochila: quantos itens (rosa, vela) dá pra levar de uma vez. Defunto não vai na mochila, vai no braço
   mochila: [
     { nome: 'Sem mochila', preco: 0, itens: 1, desc: '' },
-    { nome: 'Mochila', preco: 20, itens: 2, desc: 'Leva 2 itens: um na mão e um nas costas.' },
-    { nome: 'Mochilão', preco: 45, itens: 3, desc: 'Leva 3 itens: um na mão e dois nas costas. É a maior que tem.' },
+    { nome: 'Mochila', preco: 20, itens: 2, desc: 'leva 2 itens' },
+    { nome: 'Mochilão', preco: 45, itens: 3, desc: 'leva 3 itens' },
   ],
   // Combate do coveiro: cada um tem 3 níveis. Vale pro time todo
   combate: {
-    vida: { nome: 'Vida', precos: [35, 70, 120], desc: n => `Mais um coração. Fica com ${CFG.vidaMax + n + 1}.` },
-    defesa: { nome: 'Defesa', precos: [30, 60, 100], por: 0.15, desc: n => `${Math.round((n + 1) * 15)}% de chance de aparar a pancada.` },
-    ataque: { nome: 'Ataque', precos: [30, 60, 100], por: 0.25, desc: n => `Bate ${(n + 1) * 25}% mais forte.` },
-    velAtaque: { nome: 'Velocidade de ataque', precos: [25, 50, 90], por: 0.85, desc: n => `Golpe a cada ${(CFG.intervaloGolpe * 0.85 ** (n + 1)).toFixed(2).replace('.', ',')} s.` },
+    vida: { nome: 'Vida', precos: [35, 70, 120], desc: () => '+1 coração' },
+    defesa: { nome: 'Defesa', precos: [30, 60, 100], por: 0.15, desc: n => `${Math.round((n + 1) * 15)}% de aparar` },
+    ataque: { nome: 'Ataque', precos: [30, 60, 100], por: 0.25, desc: n => `+${(n + 1) * 25}% dano` },
+    velAtaque: { nome: 'Velocidade de ataque', precos: [25, 50, 90], por: 0.85, desc: n => `golpe a cada ${(CFG.intervaloGolpe * 0.85 ** (n + 1)).toFixed(2).replace('.', ',')} s` },
   },
   // Ajudantes: fazem o serviço sozinhos, mas andam devagar, demoram em tudo e podem morrer
   ajudantes: {
@@ -223,8 +220,8 @@ const CFG = {
     vel: 90,          // o coveiro anda 165
     vida: 3,
     tempoAcao: 1.4,   // segundos pra pegar ou largar qualquer coisa
-    carregador: { nome: 'Carregador', preco: 40, desc: 'Leva defunto da carroça até uma cova já cavada do tamanho certo.' },
-    zelador: { nome: 'Zelador', preco: 30, desc: 'Busca rosa e vela e enfeita a cova que estiver pedindo.' },
+    carregador: { nome: 'Goblin carregador', preco: 40, desc: 'leva defunto pra cova' },
+    zelador: { nome: 'Goblin zelador', preco: 30, desc: 'põe rosa e vela' },
   },
   // Bichos da noite: poucos no começo, muitos no fim, e a cada dia com mais defesa e mais cura
   ladroes: d => Math.max(1, Math.round(0.25 * d * d + 0.75)), // 1, 2, 3, 5, 7
@@ -239,6 +236,7 @@ const CFG = {
   },
   zumbi: {
     humano: { vida: 3, vel: 62, dano: 1, r: 13 },
+    goblin: { vida: 2, vel: 70, dano: 1, r: 11 },
     ogro: { vida: 8, vel: 46, dano: 2, r: 19 },
   },
   // Ladrão derrubado solta moedas no chão: o que ele levou mais um trocado. Passe por cima para pegar
@@ -266,10 +264,6 @@ const AREA = { x0: 210, passo: 250, y: 60, w: 236, h: 460, colunas: 3, passoY: 5
 const SLOTS = [0, 1, 2, 3].map(i => ({ x: 96, y: 132 + i * 72 }));
 const ESTANDES = [{ item: 'rosa', x: 64, y: 474 }, { item: 'vela', x: 140, y: 474 }];
 const CORES = ['#3d3550', '#2f6070', '#7a3b2e', '#56692f'];
-const NOMES = {
-  humano: ['Seu Juvenal', 'Dona Cotinha', 'Tio Nestor', 'Dona Filó', 'Seu Epaminondas', 'Dona Zuleica', 'Seu Tibúrcio', 'Dona Quitéria', 'Seu Anacleto', 'Dona Benedita', 'Seu Clodoaldo', 'Dona Ermelinda'],
-  ogro: ['Grumbo', 'Belarmina, a Ogra', 'Brutálio', 'Tonelada', 'Gorgonzola', 'Dona Rochedo'],
-};
 const ITEM = { rosa: 'rosa vermelha', vela: 'vela' };
 const COR = {
   tinta: '#16131c', osso: '#efe6d2', ambar: '#f2b544', sangue: '#e0525a',
@@ -586,9 +580,7 @@ function chegar(especie) {
   const i = fila.indexOf(null);
   if (i < 0) return false;
   especie = especie || (Math.random() < CFG.chanceOgro ? 'ogro' : 'humano');
-  const usados = new Set([...fila, ...covas.map(c => c.corpo)].filter(Boolean).map(c => c.nome));
-  const livres = NOMES[especie].filter(n => !usados.has(n));
-  fila[i] = { id: ++idCorpo, especie, nome: escolha(livres.length ? livres : NOMES[especie]), pedido: Math.random() < .5 ? 'rosa' : 'vela' };
+  fila[i] = { id: ++idCorpo, especie, pedido: Math.random() < .5 ? 'rosa' : 'vela' };
   return true;
 }
 
@@ -701,9 +693,9 @@ function mostrarInicio() {
   mostrarPainel(`<div class="cartao inicio">
     <div><p class="sobre">O tio morreu e sobrou pra você</p><h1>Coveiro</h1></div>
     <nav class="menu" aria-label="Menu">
-      <button type="button" data-acao="tela-solo" data-principal><b>Solo</b><small>Só você e a pá</small></button>
-      <button type="button" data-acao="tela-multi"><b>Multiplayer</b><small>Você e mais ${CFG.maxJogadores - 1} amigos</small></button>
-      <button type="button" data-acao="config"><b>Configurações</b><small>Som e tela</small></button>
+      <button type="button" data-acao="tela-solo" data-principal><b>Solo</b></button>
+      <button type="button" data-acao="tela-multi"><b>Multiplayer</b></button>
+      <button type="button" data-acao="config"><b>Configurações</b></button>
     </nav>
   </div>`);
 }
@@ -714,13 +706,17 @@ function comoJogar() {
     ? `Arrasta o dedo no lado esquerdo pra andar. Segura <b>Ação</b> pra cavar e fechar.${deitado}`
     : '<kbd>WASD</kbd> ou setas pra andar · <kbd>Espaço</kbd> faz tudo (segura pra cavar e fechar) · <kbd>Q</kbd> põe lampião · <kbd>P</kbd> pausa';
   return `<div class="blocos">
-      <div><h3>De dia · 2 minutos</h3><ol>
-        <li>Pega um defunto na carroça.</li>
-        <li>Abre a cova. Ogro paga mais, só que pede cova grande.</li>
-        <li>Bota ele lá dentro e fecha.</li>
-        <li>Leva o que o morto pediu, rosa vermelha ou vela.</li>
+      <div><h3>De dia</h3><ol>
+        <li>Pega o defunto na carroça</li>
+        <li>Cava a cova (ogro pede cova grande)</li>
+        <li>Enterra e fecha</li>
+        <li>Põe a rosa ou a vela que ele pediu</li>
       </ol></div>
-      <div><h3>De noite</h3><p>Ladrão pula o muro pra saquear as covas, e morto mal enterrado levanta atrás de você. Bate neles com o que tiver na mão. Ladrão que cai deixa moeda no chão. A noite acaba quando não sobrar ninguém de pé, e se a sua vida zerar, já era.</p></div>
+      <div><h3>De noite</h3><ol>
+        <li>Bate em ladrão e em morto que levantar</li>
+        <li>Ladrão derrubado solta moeda</li>
+        <li>Se a vida zerar, acabou</li>
+      </ol></div>
     </div>
     <p class="controles">${controles}</p>`;
 }
@@ -728,7 +724,7 @@ function comoJogar() {
 function mostrarSolo() {
   mostrarPainel(`<div class="cartao">
     <div><p class="sobre">Solo</p><h2>Como jogar</h2></div>
-    <p>Seu tio morreu e te deixou um cemitério. E uma dívida de <b>$${CFG.meta}</b> com a prefeitura. Você tem ${CFG.dias} dias pra pagar.</p>
+    <p>Seu tio te deixou um cemitério e uma dívida de <b>$${CFG.meta}</b>. Paga em ${CFG.dias} dias.</p>
     ${comoJogar()}
     <div class="botoes">
       <button class="btn" type="button" data-acao="jogar-solo" data-principal>Começar</button>
@@ -742,7 +738,7 @@ function mostrarMulti() {
   if (!online) {
     mostrarPainel(`<div class="cartao">
       <div><p class="sobre">Multiplayer</p><h2>Jogar junto</h2></div>
-      <p>Aqui dentro do Claude o online não funciona. Pra jogar com a galera, abre por este link: ${link}</p>
+      <p>Dentro do Claude não tem online. Joga por aqui: ${link}</p>
       <div class="botoes"><button class="btn" type="button" data-acao="tela-inicio" data-principal>Voltar</button></div>
     </div>`);
     return;
@@ -750,7 +746,6 @@ function mostrarMulti() {
   const convite = salaUrl;
   mostrarPainel(`<div class="cartao">
     <div><p class="sobre">Multiplayer</p><h2>Jogar junto</h2></div>
-    <p>Cabem ${CFG.maxJogadores} coveiros no cemitério. Quem cria a sala manda o link pro resto, ou passa o código de 4 letras.</p>
     <div class="linha-nome"><label for="nome">Seu nome</label><input id="nome" type="text" maxlength="14" value="${esc(p.nome)}" autocomplete="off" spellcheck="false"></div>
     ${convite ? `<div class="convite">Te chamaram pra sala <b>${esc(salaUrl)}</b>.</div>
       <div class="botoes"><button class="btn" type="button" data-acao="entrar-link" data-principal>Entrar na sala ${esc(salaUrl)}</button></div>` : ''}
@@ -775,10 +770,9 @@ function mostrarConfig() {
       ${barra('musica', 'Música')}
       ${barra('ambiente', 'Ambiente')}
       ${barra('efeitos', 'Efeitos')}
-      <label class="ajuste-marca"><input type="checkbox" id="cfg-tremor"${config.tremor ? ' checked' : ''}> Tremer a tela com pancada e explosão</label>
-      <label class="ajuste-marca"><input type="checkbox" id="cfg-leve"${config.leve ? ' checked' : ''}> Modo leve: imagem mais simples, pra computador fraco</label>
+      <label class="ajuste-marca"><input type="checkbox" id="cfg-tremor"${config.tremor ? ' checked' : ''}> Tremer a tela</label>
+      <label class="ajuste-marca"><input type="checkbox" id="cfg-leve"${config.leve ? ' checked' : ''}> Modo leve (computador fraco)</label>
     </div>
-    <p class="nota">A música já tá tocando, é só mexer e ouvir. Nas barras de ambiente e efeitos, solta pra escutar um exemplo. Isso fica salvo só neste computador.</p>
     <div class="botoes">
       <button class="btn" type="button" data-acao="fechar-config" data-principal>Voltar</button>
       <button class="btn sec" type="button" data-acao="config-padrao">Voltar pro padrão</button>
@@ -793,14 +787,13 @@ function mostrarSala() {
   const lista = jogadores.map(q => `<li><i style="background:${corSegura(q.cor)}"></i>${esc(q.nome)}${q === p ? ' (você)' : ''}</li>`).join('');
   mostrarPainel(`<div class="cartao">
     <div><p class="sobre">Partida online</p><h2>${anf ? 'Chama a galera' : 'Você tá dentro'}</h2></div>
-    ${anf ? `<p>Passa o código ou manda o link pra galera. Cabem ${CFG.maxJogadores} coveiros, e o jogo só começa quando você quiser.</p>` : ''}
     <div class="blocos">
       <div><h3>Código da sala</h3><div class="codigo-sala">${esc(codigoSala)}</div></div>
       ${anf ? `<div><h3>Ou o link</h3><div class="link-sala" id="link-sala">${esc(linkSala())}</div>
         <div class="botoes"><button class="btn sec" type="button" data-acao="copiar">Copiar link</button></div></div>` : ''}
     </div>
     <div><h3>No cemitério · ${n} de ${CFG.maxJogadores}</h3><ul class="jogadores">${lista}</ul></div>
-    <p class="nota">${n > 1 ? `Com ${n} coveiros a dívida sobe pra $${metaPara(n)}. Vem mais defunto e mais ladrão também.` : `Por enquanto é só você, com dívida de $${metaPara(1)}. Cada um que entra aumenta a dívida e traz mais defunto e mais ladrão.`}</p>
+    <p class="nota">Dívida: $${metaPara(n)}</p>
     ${anf ? '' : esperando('começar')}
     <div class="botoes">
       ${anf ? '<button class="btn" type="button" data-acao="comecar" data-principal>Começar</button>' : ''}
@@ -813,8 +806,8 @@ function mostrarSala() {
 const ABAS_LOJA = [['equipamento', 'Equipamento'], ['cemiterio', 'Cemitério'], ['combate', 'Combate']];
 
 function mostrarLoja() {
-  const n = nLadroes(), time = modo === 'solo' ? 'Você tem' : 'O time tem';
-  // uma linha da loja: nome, explicação e o botão com o preço do próximo nível (ou o texto de quando acabou)
+  const n = nLadroes();
+  // uma linha da loja: nome, efeito curto e o botão com o preço do próximo nível (ou "no máximo")
   const linha = (acao, nome, desc, acabou) => {
     const preco = ITENS_LOJA[acao].preco();
     if (preco == null) return `<li><div><b>${nome}</b><small>${acabou}</small></div></li>`;
@@ -824,27 +817,28 @@ function mostrarLoja() {
   const pips = (nivel, max) => `<span class="nivel" aria-label="nível ${nivel} de ${max}">${'●'.repeat(nivel)}${'○'.repeat(max - nivel)}</span>`;
   const ajudante = tipo => {
     const a = CFG.ajudantes[tipo], tem = contarAjudantes(tipo), max = CFG.ajudantes.maxPorTipo;
-    return linha(tipo, a.nome, `${a.desc} Anda devagar, demora em tudo e pode morrer. ${time} ${tem} de ${max}.`, `${time} ${max}, o máximo.`);
+    return linha(tipo, `${a.nome} <span class="nivel">${tem}/${max}</span>`, a.desc, 'no máximo');
   };
+  const nivelado = (acao, titulo, lista, nivel) => linha(acao, `${titulo} ${pips(nivel, lista.length - 1)}`, prox(lista, nivel).desc, 'no máximo');
   const abas = {
     equipamento: () => [
-      linha('ferramenta', prox(CFG.ferramentas, nivelFerr).nome, prox(CFG.ferramentas, nivelFerr).desc, 'Não tem ferramenta melhor que essa.'),
-      linha('bota', prox(CFG.botas, nivelBota).nome, prox(CFG.botas, nivelBota).desc, 'Não tem bota mais rápida que essa.'),
-      linha('mochila', prox(CFG.mochila, nivelMochila).nome, prox(CFG.mochila, nivelMochila).desc, 'Não tem mochila maior que essa.'),
-      linha('lampiao', 'Lampião', `Ladrão não mexe em cova iluminada. Põe no chão com ${toque ? 'o botão Lampião' : '<kbd>Q</kbd>'}. ${time} ${estoque}.`, ''),
+      nivelado('ferramenta', prox(CFG.ferramentas, nivelFerr).nome, CFG.ferramentas, nivelFerr),
+      nivelado('bota', prox(CFG.botas, nivelBota).nome, CFG.botas, nivelBota),
+      nivelado('mochila', prox(CFG.mochila, nivelMochila).nome, CFG.mochila, nivelMochila),
+      linha('lampiao', `Lampião <span class="nivel">${estoque}</span>`, 'afasta ladrão da cova', ''),
     ],
     cemiterio: () => [
-      linha('propaganda', prox(CFG.propaganda, nivelProp).nome, prox(CFG.propaganda, nivelProp).desc, 'Não tem propaganda melhor que essa.'),
+      nivelado('propaganda', 'Propaganda', CFG.propaganda, nivelProp),
       ajudante('carregador'),
       ajudante('zelador'),
     ],
     combate: () => Object.entries(CFG.combate).map(([k, c]) =>
-      linha(k, `${c.nome} ${pips(nivelComb[k], c.precos.length)}`, c.desc(nivelComb[k]), 'No máximo.')),
+      linha(k, `${c.nome} ${pips(nivelComb[k], c.precos.length)}`, c.desc(nivelComb[k]), 'no máximo')),
   };
   mostrarPainel(`<div class="cartao largo">
     <div><p class="sobre">Anoitecer do dia ${dia} de ${CFG.dias}</p><h2>Loja do coveiro</h2></div>
-    <div class="saldo"><b>$${dinheiro}</b><span>no bolso · a prefeitura cobra $${meta} no amanhecer do dia ${CFG.dias + 1}</span></div>
-    <div class="alerta">Hoje à noite ${n === 1 ? 'vem um ladrão' : 'vêm ' + n + ' ladrões'}.${ultimaNoite() ? ' O chefe deles vem junto, e cada pancada dele tira grana do seu bolso.' : ''}</div>
+    <div class="saldo"><b>$${dinheiro}</b><span>de $${meta} · vence no dia ${CFG.dias + 1}</span></div>
+    <div class="alerta">Hoje à noite ${n === 1 ? 'vem um ladrão' : 'vêm ' + n + ' ladrões'}.${ultimaNoite() ? ' E o chefe deles.' : ''}</div>
     <div class="loja-corpo">
       <nav class="loja-abas" role="tablist" aria-label="Seções da loja">
         ${ABAS_LOJA.map(([k, nome]) => `<button type="button" role="tab" data-acao="aba-${k}" aria-selected="${lojaAba === k}">${nome}</button>`).join('')}
@@ -874,9 +868,9 @@ function mostrarFim() {
   const falta = Math.max(0, meta - dinheiro);
   const time = jogadores.length > 1;
   const t = {
-    vitoria: ['Amanhecer do dia ' + (CFG.dias + 1), 'Dívida paga', `${time ? 'Vocês fecharam' : 'Você fechou'} com $${dinheiro} e ${enterros} enterros. A prefeitura largou do seu pé, e o cemitério agora é ${time ? 'de vocês' : 'seu'}.`, 'Jogar de novo'],
-    divida: ['Amanhecer do dia ' + (CFG.dias + 1), 'A prefeitura levou tudo', `${time ? 'Vocês chegaram' : 'Você chegou'} com $${dinheiro} e faltou $${falta}. Foram ${enterros} enterros, e mesmo assim a prefeitura tomou o cemitério.`, 'Tentar de novo'],
-    morte: [`Noite do dia ${dia}`, time ? 'O time inteiro caiu' : 'Você virou cliente', time ? `Não sobrou um coveiro de pé, e ficaram $${dinheiro} no caixa. Pelo menos o enterro sai de graça.` : `O coveiro caiu no próprio cemitério com $${dinheiro} no bolso. Pelo menos o enterro sai de graça.`, 'Tentar de novo'],
+    vitoria: ['Amanhecer do dia ' + (CFG.dias + 1), 'Dívida paga', `$${dinheiro} e ${enterros} enterros. O cemitério é ${time ? 'de vocês' : 'seu'}.`, 'Jogar de novo'],
+    divida: ['Amanhecer do dia ' + (CFG.dias + 1), 'A prefeitura levou tudo', `Faltou $${falta}. A prefeitura tomou o cemitério.`, 'Tentar de novo'],
+    morte: [`Noite do dia ${dia}`, time ? 'O time inteiro caiu' : 'Você virou cliente', 'Pelo menos o enterro sai de graça.', 'Tentar de novo'],
   }[tipoFim] || ['Fim', 'Fim de jogo', '', 'Jogar de novo'];
   mostrarPainel(`<div class="cartao">
     <div><p class="sobre">${t[0]}</p><h2>${t[1]}</h2></div>
@@ -1109,7 +1103,7 @@ function acaoPress(q) {
     // defunto vai no braço: os itens que sobrarem precisam caber na mochila
     if (c && !leva && q.itens.length <= capacidade() - 1) {
       q.carrega = { tipo: 'corpo', corpo: c }; fila[a.i] = null; tocar('pop', q.x, q.y);
-      aviso(`${c.nome} quer ${ITEM[c.pedido]}. ${c.especie === 'ogro' ? 'E precisa de cova grande.' : 'Cova pequena serve.'}`, q);
+      aviso(c.especie === 'ogro' ? 'Ogro precisa de cova grande.' : 'Cova pequena serve.', q);
     } else if (!c && leva) {
       fila[a.i] = leva.corpo; q.carrega = null; tocar('pop', q.x, q.y);
     } else if (c) {
@@ -1293,7 +1287,7 @@ function levantar(c) {
   const z = CFG.zumbi[c.corpo.especie];
   c.levantou = true; c.fechada = false; c.fechar = 0; c.enfeite = null;
   inimigos.push({ id: ++idInimigo, tipo: 'zumbi', especie: c.corpo.especie, x: c.x, y: c.y, r: z.r, vida: z.vida, vidaMax: z.vida, vel: z.vel, dano: z.dano, defesa: CFG.defesa(dia), cura: CFG.cura(dia), cova: c, cd: .8, flash: 0, dir: 0 });
-  flutua(c.x, c.y - 44, `${c.corpo.nome} levantou!`, COR.sangue); tocar('gemido', c.x, c.y);
+  flutua(c.x, c.y - 44, 'Levantou!', COR.sangue); tocar('gemido', c.x, c.y);
   tremer(.2);
 }
 function devolver(z) { z.cova.levantou = false; }
@@ -1377,11 +1371,9 @@ function atualizarInimigos(dt) {
 
 // ===== Ajudantes: carregador leva defunto até cova cavada; zelador repõe rosa e vela =====
 // Andam devagar, demoram CFG.ajudantes.tempoAcao em cada coisa que pegam ou largam, e bicho pode matar
-const NOMES_AJUDANTE = ['Zé Pá', 'Tonhão', 'Dona Lurdes', 'Nico', 'Magrão', 'Tião', 'Dona Cida', 'Juca', 'Bigode', 'Dona Neide'];
 const contarAjudantes = tipo => ajudantes.filter(a => a.tipo === tipo).length;
 function contratar(tipo) {
-  const usados = new Set(ajudantes.map(a => a.nome)), livres = NOMES_AJUDANTE.filter(n => !usados.has(n));
-  const a = { id: ++idAjudante, ajudante: true, tipo, nome: escolha(livres.length ? livres : NOMES_AJUDANTE), x: 186, y: 300, r: 11, dir: 0,
+  const a = { id: ++idAjudante, ajudante: true, tipo, x: 186, y: 300, r: 11, dir: 0,
     vida: CFG.ajudantes.vida, inv: 0, carrega: null, tarefa: null, acao: 0, andando: false };
   ajudantes.push(a);
   Object.assign(a, pontoDeEspera(a));
@@ -1484,8 +1476,8 @@ function ferirAjudante(a, d, fonte) {
   if (a.carrega && a.carrega.tipo === 'corpo') { const i = fila.indexOf(null); if (i >= 0) fila[i] = a.carrega.corpo; }
   // morreu no serviço e vira freguês, se couber na carroça
   const i = fila.indexOf(null);
-  if (i >= 0) fila[i] = { id: ++idCorpo, especie: 'humano', nome: a.nome, pedido: Math.random() < .5 ? 'rosa' : 'vela' };
-  aviso(i >= 0 ? `${a.nome} morreu no serviço. Tá na carroça.` : `${a.nome} morreu no serviço.`);
+  if (i >= 0) fila[i] = { id: ++idCorpo, especie: 'goblin', pedido: Math.random() < .5 ? 'rosa' : 'vela' };
+  aviso(`Um goblin morreu${i >= 0 ? ' e foi pra carroça' : ''}.`);
   tocar('gemido', a.x, a.y);
 }
 // morto que levanta vai atrás de quem estiver mais perto: coveiro ou ajudante
@@ -1905,7 +1897,7 @@ function fotoMundo() {
   return {
     t: 'mundo', estado: estado === 'pausa' ? estadoPausado : estado, dia, dinheiro, meta, relogio: Math.round(relogio * 10) / 10,
     nivelFerr, nivelBota, nivelProp, nivelMochila, nivelComb, velJogo, dono, estoque, tipoFim, stats, codigo: codigoSala, fila, lampioes,
-    ajudantes: ajudantes.map(a => [a.id, a.tipo, a.nome, Math.round(a.x), Math.round(a.y), r2(a.dir), a.carrega, a.vida, a.andando ? 1 : 0, a.acao > 0 ? r2(1 - a.acao / CFG.ajudantes.tempoAcao) : 0, a.inv > 0 ? 1 : 0]),
+    ajudantes: ajudantes.map(a => [a.id, a.tipo, Math.round(a.x), Math.round(a.y), r2(a.dir), a.carrega, a.vida, a.andando ? 1 : 0, a.acao > 0 ? r2(1 - a.acao / CFG.ajudantes.tempoAcao) : 0, a.inv > 0 ? 1 : 0]),
     evento: evento ? [evento.tipo, evento.etapa, Math.round(evento.frente || 0)] : null,
     moedas: moedas.map(m => [m.id, Math.round(m.x), Math.round(m.y), Math.round(m.ox), Math.round(m.oy), r2(m.t)]),
     perigos: perigos.map(h => [h.tipo, Math.round(h.x), Math.round(h.y), Math.round(h.ox), Math.round(h.oy), r2(h.t), r2(h.dur)]),
@@ -1993,8 +1985,8 @@ function aplicarMundo(m) {
   dono = m.dono.slice(); ajustarAreas(dono.length);
   evento = m.evento ? { tipo: m.evento[0], etapa: m.evento[1], frente: m.evento[2] } : null;
   const velhosA = new Map(ajudantes.map(a => [a.id, a]));
-  ajudantes = (m.ajudantes || []).map(v => Object.assign(velhosA.get(v[0]) || { x: v[3], y: v[4], ajudante: true, r: 11 },
-    { id: v[0], tipo: v[1], nome: limparNome(v[2]), alvoX: v[3], alvoY: v[4], dir: v[5], carrega: v[6], vida: v[7], andando: !!v[8], prog: v[9], inv: v[10] ? .5 : 0 }));
+  ajudantes = (m.ajudantes || []).map(v => Object.assign(velhosA.get(v[0]) || { x: v[2], y: v[3], ajudante: true, r: 11 },
+    { id: v[0], tipo: v[1], alvoX: v[2], alvoY: v[3], dir: v[4], carrega: v[5], vida: v[6], andando: !!v[7], prog: v[8], inv: v[9] ? .5 : 0 }));
   moedas = (m.moedas || []).map(v => ({ id: v[0], x: v[1], y: v[2], ox: v[3], oy: v[4], t: v[5] }));
   perigos = (m.perigos || []).map(v => ({ tipo: v[0], x: v[1], y: v[2], ox: v[3], oy: v[4], t: v[5], dur: v[6] }));
   m.covas.forEach((v, i) => {
@@ -2189,7 +2181,7 @@ function desenharVela(x, y, s = 1, apagada = false) {
 }
 
 function desenharCorpo(x, y, especie, ang = 0, s = 1) {
-  const og = especie === 'ogro', w = (og ? 80 : 64) * s, h = (og ? 30 : 22) * s;
+  const og = especie === 'ogro', gob = especie === 'goblin', w = (og ? 80 : gob ? 48 : 64) * s, h = (og ? 30 : gob ? 18 : 22) * s;
   ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
   rr(-w / 2 + 3, -h / 2 + 4, w, h, h / 2); ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fill();
   rr(-w / 2, -h / 2, w, h, h / 2); ctx.fillStyle = COR.mortalha; ctx.fill(); contorno(2.2);
@@ -2199,7 +2191,7 @@ function desenharCorpo(x, y, especie, ang = 0, s = 1) {
     ctx.beginPath(); ctx.moveTo(bx, -h / 2 + 2); ctx.lineTo(bx - 4 * s, h / 2 - 2); ctx.stroke();
   }
   const rx = -w / 2 + h * .55, rr_ = h * .38;
-  circulo(rx, 0, rr_); ctx.fillStyle = og ? '#8aa65e' : '#dcc7a4'; ctx.fill(); contorno(1.8);
+  circulo(rx, 0, rr_); ctx.fillStyle = og ? '#8aa65e' : gob ? PELE_GOBLIN : '#dcc7a4'; ctx.fill(); contorno(1.8);
   ctx.strokeStyle = COR.tinta; ctx.lineWidth = 1.3;
   [-1, 1].forEach(sg => {
     const ex = rx + rr_ * .25, ey = sg * rr_ * .42, k = rr_ * .22;
@@ -2245,8 +2237,6 @@ function desenharCova(c) {
     return;
   }
   const k = Math.min(1, c.prof);
-  ctx.fillStyle = COR.terra;
-  ctx.beginPath(); ctx.ellipse(x + c.w / 2 + 5, y + 8, 6 + c.prof * 4, 10 + c.prof * 8, 0, 0, TAU); ctx.fill(); contorno(2);
   const hw = c.w * (.5 + .5 * k), hh = c.h * (.5 + .5 * k);
   rr(x - hw / 2, y - hh / 2, hw, hh, 5);
   ctx.fillStyle = COR.buraco[c.prof >= 2 ? 2 : c.prof >= 1 ? 1 : 0]; ctx.fill(); contorno(2.5);
@@ -2380,31 +2370,40 @@ function desenharCoveiro(q) {
   ctx.restore();
 }
 
-// Ajudante: menor que o coveiro, de macacão e boné. Carregador de marrom, zelador de verde
+// Ajudante: goblin pequeno e verde, de cabeção e orelha pontuda. Carregador de colete marrom, zelador de avental roxo
+const PELE_GOBLIN = '#7fb24a';
 function desenharAjudante(a) {
   const x = a.x, y = a.y, bob = a.andando ? Math.sin(tempo * 12 + x * .01) * 1.2 : 0, carregador = a.tipo === 'carregador';
   ctx.save();
   if (a.inv > 0 && Math.floor(tempo * 20) % 2) ctx.globalAlpha = .45;
-  sombra(x, y + 10, 12, 4);
-  ctx.beginPath(); ctx.ellipse(x, y + 2 + bob * .3, 10, 9.5, 0, 0, TAU); ctx.fillStyle = carregador ? '#7a5a3a' : '#4f6b3a'; ctx.fill(); contorno(2.2);
-  const hx = x + Math.cos(a.dir) * 1.5, hy = y - 6 + bob;
-  circulo(hx, hy, 6.8); ctx.fillStyle = '#e0bb8f'; ctx.fill(); contorno(2);
+  sombra(x, y + 10, 10, 3.5);
+  ctx.beginPath(); ctx.ellipse(x, y + 3 + bob * .3, 8, 7.5, 0, 0, TAU); ctx.fillStyle = carregador ? '#6b4a2b' : '#5a3f73'; ctx.fill(); contorno(2);
+  const hx = x + Math.cos(a.dir) * 1.5, hy = y - 5 + bob, ox = Math.cos(a.dir) * 2;
+  [-1, 1].forEach(sg => {
+    ctx.beginPath(); ctx.moveTo(hx + sg * 5, hy - 2); ctx.lineTo(hx + sg * 14, hy - 6); ctx.lineTo(hx + sg * 5.5, hy + 3); ctx.closePath();
+    ctx.fillStyle = PELE_GOBLIN; ctx.fill(); contorno(1.6);
+  });
+  circulo(hx, hy, 7.2); ctx.fillStyle = PELE_GOBLIN; ctx.fill(); contorno(2);
+  ctx.fillStyle = '#f2e24a';
+  circulo(hx - 2.6 + ox, hy - .5, 1.8); ctx.fill();
+  circulo(hx + 2.6 + ox, hy - .5, 1.8); ctx.fill();
   ctx.fillStyle = COR.tinta;
-  circulo(hx - 2.4 + Math.cos(a.dir) * 2, hy + 1.5, 1.1); ctx.fill();
-  circulo(hx + 2.4 + Math.cos(a.dir) * 2, hy + 1.5, 1.1); ctx.fill();
-  ctx.beginPath(); ctx.arc(hx, hy - 1.5, 7, Math.PI, 0); ctx.closePath(); ctx.fillStyle = carregador ? '#b5563a' : '#d9c46a'; ctx.fill(); contorno(1.6);
+  circulo(hx - 2.6 + ox * 1.3, hy - .5, .8); ctx.fill();
+  circulo(hx + 2.6 + ox * 1.3, hy - .5, .8); ctx.fill();
+  ctx.strokeStyle = COR.tinta; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.arc(hx + ox, hy + 2.5, 2.4, .2, Math.PI - .2); ctx.stroke();
   const leva = a.carrega;
-  if (leva && leva.tipo === 'corpo') desenharCorpo(x, y - 24 + bob, leva.corpo.especie, 0, .6);
+  if (leva && leva.tipo === 'corpo') desenharCorpo(x, y - 22 + bob, leva.corpo.especie, 0, .56);
   else if (leva && leva.tipo === 'item') {
-    const ix = x + Math.cos(a.dir) * 12, iy = y + Math.sin(a.dir) * 8 + 2;
-    if (leva.item === 'rosa') desenharRosa(ix, iy, .95); else desenharVela(ix, iy, .95);
+    const ix = x + Math.cos(a.dir) * 11, iy = y + Math.sin(a.dir) * 7 + 3;
+    if (leva.item === 'rosa') desenharRosa(ix, iy, .9); else desenharVela(ix, iy, .9);
   }
   ctx.restore();
 }
 
 function desenharZumbi(e) {
   const og = e.especie === 'ogro', r = e.r, sway = Math.sin(tempo * 6 + e.x * .1) * 1.5;
-  const pele = og ? '#6f8f4c' : '#8aa47a';
+  const pele = og ? '#6f8f4c' : e.especie === 'goblin' ? PELE_GOBLIN : '#8aa47a';
   sombra(e.x, e.y + r * .9, r, r * .35);
   ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(e.dir); ctx.lineCap = 'round';
   [[og ? 9 : 7, COR.tinta], [og ? 6 : 4.5, pele]].forEach(([lw, cor]) => {
@@ -2722,10 +2721,8 @@ function desenhar() {
     if (c.corpo && !c.fechada && !c.levantou && c.fechar > 0) barra(c.x, by, c.fechar, COR.osso);
     else if (!c.corpo && c.prof > 0 && c.prof < 2) barra(c.x, by, c.prof / 2, COR.ambar, .5);
   }
-  ajudantes.forEach((a, i) => {
+  ajudantes.forEach(a => {
     if (!naTela(a.y)) return;
-    // nome só de quem não está colado em outro ajudante, pra não embolar
-    if (!ajudantes.some((o, j) => j < i && Math.hypot(o.x - a.x, o.y - a.y) < 44)) texto(a.nome, a.x, a.y + 22, 10, COR.osso, 600);
     const prog = modo === 'convidado' ? a.prog : a.acao > 0 ? 1 - a.acao / CFG.ajudantes.tempoAcao : 0;
     if (prog > 0) barra(a.x, a.y - 26, prog, COR.osso);
     if (a.vida < CFG.ajudantes.vida) barra(a.x, a.y - 34, a.vida / CFG.ajudantes.vida, COR.sangue);
@@ -2747,7 +2744,7 @@ function desenhar() {
   barraChefe();
 }
 
-// ===== HUD e dica =====
+// ===== HUD =====
 const cache = {};
 function pinta(id, prop, val) {
   const chave = id + '.' + prop;
@@ -2781,59 +2778,9 @@ function atualizarHUD() {
   pinta('hud-lampioes', 'textContent', `Lampiões ${estoque}`);
   pinta('hud-sala', 'hidden', modo === 'solo');
   pinta('hud-sala', 'textContent', `Sala ${codigoSala} · ${jogadores.length} ${jogadores.length === 1 ? 'coveiro' : 'coveiros'}${modo === 'convidado' && pingMs ? ` · ping ${pingMs} ms` : ''}`);
-  pinta('dica', 'innerHTML', `<span>${textoDica()}</span>`);
-  // antes do jogo, o HUD e a dica somem (mantêm o espaço para a tela não pular ao começar)
+  // antes do jogo, o HUD some (mantém o espaço para a tela não pular ao começar)
   const fora = estado === 'titulo' || estado === 'sala' || estado === 'conexao' ? 'fora' : '';
   pinta('hud', 'className', fora);
-  pinta('dica', 'className', fora); // o span evita que o flex engula os espaços em volta do <b>
-}
-
-// "uma rosa", "2 rosas e uma vela"
-function resumoItens(itens) {
-  const n = k => itens.filter(i => i === k).length, parte = (q, um, varios) => (q === 1 ? um : q > 1 ? `${q} ${varios}` : '');
-  return [parte(n('rosa'), 'uma rosa', 'rosas'), parte(n('vela'), 'uma vela', 'velas')].filter(Boolean).join(' e ');
-}
-
-function textoDica() {
-  if (estado !== 'dia' && estado !== 'noite') return '';
-  if (p.caido) return 'Você caiu. Volta quando amanhecer.';
-  const K = toque ? 'Ação' : 'Espaço';
-  if (inimigoPerto(p, 40)) return `<b>${K}</b>: bater`;
-  const a = alvoAtual(p), leva = p.carrega;
-  const levando = [leva ? esc(leva.corpo.nome) : '', resumoItens(p.itens)].filter(Boolean).join(', ');
-  const levaTxt = levando ? `Levando ${levando}` : '';
-  let acao = '';
-  if (a && a.tipo === 'slot') {
-    const c = fila[a.i];
-    if (c && !leva && p.itens.length <= capacidade() - 1) acao = `<b>${K}</b>: pegar ${esc(c.nome)} (${c.especie === 'ogro' ? 'ogro' : 'humano'}, quer ${ITEM[c.pedido] || ''})`;
-    else if (c) acao = 'Mãos ocupadas';
-    else if (leva) acao = `<b>${K}</b>: devolver pra carroça`;
-  } else if (a && a.tipo === 'estande') {
-    if (cabeItem(p)) acao = `<b>${K}</b>: pegar ${ITEM[a.item]}`;
-    else if (p.itens.includes(a.item)) acao = `<b>${K}</b>: devolver ${ITEM[a.item]}`;
-    else if (p.itens.length) acao = `<b>${K}</b>: trocar por ${ITEM[a.item]}`;
-    else acao = 'Mãos ocupadas';
-  } else if (a && a.tipo === 'placa') {
-    const preco = CFG.precoTerreno(a.area);
-    acao = dinheiro >= preco ? `<b>${K}</b>: comprar esse terreno por $${preco}` : `Terreno à venda por $${preco}. Faltam $${preco - dinheiro}.`;
-  } else if (a && a.tipo === 'cova') {
-    const c = a.cova;
-    if (c.levantou) acao = 'Cova vazia. O morto saiu andando.';
-    else if (!c.corpo) {
-      const req = leva && leva.tipo === 'corpo' ? CFG.profundidade[leva.corpo.especie] : 0;
-      if (req && c.prof >= req) acao = `<b>${K}</b>: botar ${esc(leva.corpo.nome)} na cova`;
-      else if (c.prof < 2) acao = `Segura <b>${K}</b> pra cavar${req === 2 ? ' (ogro precisa de cova grande)' : ''}`;
-      else acao = 'Cova grande pronta';
-    } else if (!c.fechada) acao = `Segura <b>${K}</b> pra fechar a cova`;
-    else if (c.enfeite !== c.corpo.pedido) {
-      acao = p.itens.includes(c.corpo.pedido)
-        ? `<b>${K}</b>: colocar ${ITEM[c.corpo.pedido]}`
-        : c.enfeite === 'apagada' ? `A vela de ${esc(c.corpo.nome)} apagou. Tem vela nova lá embaixo, à esquerda.`
-        : `${esc(c.corpo.nome)} quer ${ITEM[c.corpo.pedido] || ''}. Tem lá embaixo, à esquerda.`;
-    } else acao = `${esc(c.corpo.nome)} descansa em paz`;
-  }
-  if (!acao && !levaTxt) return estado === 'noite' ? 'Protege as covas. Ladrão não chega perto de lampião.' : '';
-  return [levaTxt, acao].filter(Boolean).join(' · ');
 }
 
 // ===== Tela e toque =====
