@@ -85,6 +85,18 @@ kbd{font-family:inherit;font-size:.85em;font-weight:600;padding:1px 6px;border-r
 .resumo li{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--linha);padding-bottom:6px}
 .resumo b{font-variant-numeric:tabular-nums}
 #hud.fora,#dica.fora{visibility:hidden}
+.cartao.largo{width:min(760px,100%)}
+.loja-corpo{display:grid;grid-template-columns:10.5em minmax(0,1fr);gap:14px;align-items:start}
+.loja-abas{display:flex;flex-direction:column;gap:6px}
+.loja-abas button{font:inherit;font-size:15px;font-weight:600;text-align:left;padding:10px 12px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--osso-2);cursor:pointer}
+.loja-abas button:hover{color:var(--osso);border-color:var(--linha)}
+.loja-abas button[aria-selected=true]{background:var(--tinta-3);border-color:var(--linha);color:var(--osso)}
+.loja-abas button:focus-visible{outline:3px solid var(--osso);outline-offset:2px}
+.nivel{color:var(--ambar);font-size:12px;letter-spacing:2px;margin-left:6px}
+@media (max-width:600px){.loja-corpo{grid-template-columns:1fr}.loja-abas{flex-direction:row;flex-wrap:wrap}}
+.hud-btn{font:inherit;font-size:13px;font-weight:600;padding:3px 10px;border-radius:999px;border:1px solid var(--linha);background:transparent;color:var(--osso-2);cursor:pointer;font-variant-numeric:tabular-nums}
+.hud-btn:hover{border-color:var(--osso-2);color:var(--osso)}
+.hud-btn.ligado{background:var(--ambar);border-color:var(--ambar);color:var(--tinta)}
 .cartao.inicio{width:min(440px,100%)}
 .menu{display:flex;flex-direction:column;gap:8px}
 .menu button{font:inherit;display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;box-sizing:border-box;padding:14px 16px;border-radius:10px;border:1px solid var(--linha);background:var(--tinta-3);color:var(--osso);cursor:pointer;text-align:left}
@@ -119,6 +131,8 @@ kbd{font-family:inherit;font-size:.85em;font-weight:600;padding:1px 6px;border-r
       <span id="hud-fase" class="fase dia">Dia</span>
       <div class="relogio" aria-hidden="true"><div id="hud-barra"></div></div>
       <span id="hud-relogio" class="num">2:00</span>
+      <button id="btn-vel" class="hud-btn" type="button" title="Velocidade do jogo">1x</button>
+      <button id="btn-pular" class="hud-btn" type="button" title="Pular a noite" hidden>Pular a noite</button>
     </div>
     <div class="hud-grupo">
       <span class="dinheiro num"><b id="hud-dinheiro">$0</b><span id="hud-meta">de $200</span></span>
@@ -161,11 +175,15 @@ const CFG = {
   fecharPorSeg: 0.5,
   velocidade: 165,
   vidaMax: 5,
+  intervaloGolpe: 0.6,  // segundos entre um golpe e outro do coveiro
+  velocidadeRapida: 1.5, // o botão de acelerar o jogo
   precoLampiao: 15,
   raioLampiao: 95,
-  // Terreno sem fim: sempre há 2 à venda depois do último comprado, cada um mais caro (60, 100, 150, 225...)
+  // Terreno sem fim: fileiras de 3 que vão descendo. Começa com 3 (1 seu, 2 à venda); depois só aparece
+  // o próximo quando o último for comprado. Cada um é mais caro (60, 100, 150, 225...)
   precoTerreno: i => (i === 0 ? 0 : i === 1 ? 60 : Math.round(20 * 1.5 ** (i - 2)) * 5),
-  terrenosAVenda: 2,
+  terrenosIniciais: 3,
+  terrenosAVenda: 1,
   maxJogadores: 4,
   ferramentas: [
     { nome: 'Mãos', preco: 0, cavar: 1, dano: 1, desc: '' },
@@ -179,6 +197,35 @@ const CFG = {
     { nome: 'Bota de cano alto', preco: 60, vel: 1.4, desc: 'Anda 40% mais rápido.' },
     { nome: 'Bota de sete léguas', preco: 120, vel: 1.65, desc: 'Anda 65% mais rápido. Atravessa o cemitério num pulo.' },
   ],
+  // Quanto mais propaganda, mais rápido chega defunto (fator multiplica o intervalo entre um e outro)
+  propaganda: [
+    { nome: 'Boca a boca', preco: 0, fator: 1, desc: '' },
+    { nome: 'Placa na estrada', preco: 30, fator: 0.8, desc: 'Chega defunto 25% mais rápido.' },
+    { nome: 'Anúncio no jornal', preco: 70, fator: 0.65, desc: 'Chega defunto 50% mais rápido.' },
+    { nome: 'Contrato com o hospital', preco: 130, fator: 0.5, desc: 'Chega defunto no dobro da velocidade.' },
+  ],
+  // Mochila: quantos itens (rosa, vela) dá pra levar de uma vez. Defunto não vai na mochila, vai no braço
+  mochila: [
+    { nome: 'Sem mochila', preco: 0, itens: 1, desc: '' },
+    { nome: 'Mochila', preco: 20, itens: 2, desc: 'Leva 2 itens: um na mão e um nas costas.' },
+    { nome: 'Mochilão', preco: 45, itens: 3, desc: 'Leva 3 itens: um na mão e dois nas costas. É a maior que tem.' },
+  ],
+  // Combate do coveiro: cada um tem 3 níveis. Vale pro time todo
+  combate: {
+    vida: { nome: 'Vida', precos: [35, 70, 120], desc: n => `Mais um coração. Fica com ${CFG.vidaMax + n + 1}.` },
+    defesa: { nome: 'Defesa', precos: [30, 60, 100], por: 0.15, desc: n => `${Math.round((n + 1) * 15)}% de chance de aparar a pancada.` },
+    ataque: { nome: 'Ataque', precos: [30, 60, 100], por: 0.25, desc: n => `Bate ${(n + 1) * 25}% mais forte.` },
+    velAtaque: { nome: 'Velocidade de ataque', precos: [25, 50, 90], por: 0.85, desc: n => `Golpe a cada ${(CFG.intervaloGolpe * 0.85 ** (n + 1)).toFixed(2).replace('.', ',')} s.` },
+  },
+  // Ajudantes: fazem o serviço sozinhos, mas andam devagar, demoram em tudo e podem morrer
+  ajudantes: {
+    maxPorTipo: 2,
+    vel: 90,          // o coveiro anda 165
+    vida: 3,
+    tempoAcao: 1.4,   // segundos pra pegar ou largar qualquer coisa
+    carregador: { nome: 'Carregador', preco: 40, desc: 'Leva defunto da carroça até uma cova já cavada do tamanho certo.' },
+    zelador: { nome: 'Zelador', preco: 30, desc: 'Busca rosa e vela e enfeita a cova que estiver pedindo.' },
+  },
   // Bichos da noite: poucos no começo, muitos no fim, e a cada dia com mais defesa e mais cura
   ladroes: d => Math.max(1, Math.round(0.25 * d * d + 0.75)), // 1, 2, 3, 5, 7
   chanceBrutamontes: d => Math.min(0.5, Math.max(0, 0.15 * (d - 2))), // aparece a partir do dia 3
@@ -214,8 +261,8 @@ const CFG = {
 const LINK_ABERTO = 'https://lyiu-10.github.io/coveiro/';
 
 // ===== Mundo =====
-const W = 960, H = 560; // tamanho da tela; o mundo cresce para a direita conforme compra terreno
-const AREA = { x0: 210, passo: 250, y: 60, w: 236, h: 460 };
+const W = 960, H = 560; // tamanho da tela; o mundo desce conforme compra terreno
+const AREA = { x0: 210, passo: 250, y: 60, w: 236, h: 460, colunas: 3, passoY: 500 };
 const SLOTS = [0, 1, 2, 3].map(i => ({ x: 96, y: 132 + i * 72 }));
 const ESTANDES = [{ item: 'rosa', x: 64, y: 474 }, { item: 'vela', x: 140, y: 474 }];
 const CORES = ['#3d3550', '#2f6070', '#7a3b2e', '#56692f'];
@@ -257,13 +304,13 @@ function lerNome() { try { return limparNome(localStorage.getItem('coveiro.nome'
 function salvarNome(n) { try { localStorage.setItem('coveiro.nome', n); } catch (e) { /* sem armazenamento */ } }
 
 // ===== Configurações (ficam só neste aparelho) =====
-const CONFIG_PADRAO = { geral: 80, musica: 70, ambiente: 70, efeitos: 80, tremor: !reduzMov };
+const CONFIG_PADRAO = { geral: 80, musica: 70, ambiente: 70, efeitos: 80, tremor: !reduzMov, leve: false, leveAuto: true };
 function lerConfig() {
   const c = Object.assign({}, CONFIG_PADRAO);
   try {
     const salvo = JSON.parse(localStorage.getItem('coveiro.config') || '{}');
     ['geral', 'musica', 'ambiente', 'efeitos'].forEach(k => { if (Number.isFinite(salvo[k])) c[k] = Math.max(0, Math.min(100, Math.round(salvo[k]))); });
-    if (typeof salvo.tremor === 'boolean') c.tremor = salvo.tremor;
+    ['tremor', 'leve', 'leveAuto'].forEach(k => { if (typeof salvo[k] === 'boolean') c[k] = salvo[k]; });
   } catch (e) { /* sem armazenamento: fica o padrão */ }
   return c;
 }
@@ -346,6 +393,7 @@ const SONS = {
   moeda: (t, d) => { tom('square', 1318, t, .08, .14, d, 0, 5000); tom('square', 1760, t + .07, .25, .14, d, 0, 5000); },
   compra: (t, d) => { chiado(t, .05, .12, d, 'highpass', 3000); SONS.moeda(t + .04, d); },
   golpe: (t, d) => { chiado(t, .1, .45, d, 'lowpass', 1800, 300); tom('sine', 190, t, .13, .35, d, 70); },
+  defesa: (t, d) => { tom('square', 1900, t, .09, .07, d, 1500, 6000); tom('triangle', 2600, t + .01, .25, .08, d); },
   dor: (t, d) => tom('sawtooth', 300, t, .25, .24, d, 140, 1200),
   ladrao: (t, d) => { tom('sine', 1150, t, .12, .22, d, 1650); tom('sine', 1000, t + .16, .18, .22, d, 700); },
   roubo: (t, d) => { tom('triangle', 880, t, .12, .15, d, 440); tom('triangle', 620, t + .13, .2, .15, d, 300); },
@@ -363,20 +411,20 @@ const SONS = {
 };
 const ultimoSom = {};
 // Toca um efeito aqui; com x, fica mais baixo quanto mais longe da câmera
-function tocarLocal(nome, x) {
+function tocarLocal(nome, x, y) {
   if (!som.ctx || som.ctx.state !== 'running' || !Object.prototype.hasOwnProperty.call(SONS, nome)) return;
   const agora = som.ctx.currentTime;
   if (agora - (ultimoSom[nome] || -1) < .045) return; // o mesmo som várias vezes no mesmo instante vira um só
   ultimoSom[nome] = agora;
   let vol = 1;
-  if (x != null) { vol = Math.min(1, 1.35 - Math.abs(x - (camX + W / 2)) / 700); if (vol <= .05) return; }
+  if (x != null) { vol = Math.min(1, 1.35 - Math.hypot(x - (camX + W / 2), (y == null ? camY + H / 2 : y) - (camY + H / 2)) / 700); if (vol <= .05) return; }
   const g = som.ctx.createGain(); g.gain.value = vol * 1.6; g.connect(som.canais.efeitos);
   try { SONS[nome](agora + .01, g); } catch (e) { /* receita quebrada não derruba o jogo */ }
 }
 // Toca e, no online, manda o anfitrião tocar também nos convidados
-function tocar(nome, x) {
-  tocarLocal(nome, x);
-  if (modo === 'anfitriao') eventos.push({ s: [nome, x == null ? null : Math.round(x)] });
+function tocar(nome, x, y) {
+  tocarLocal(nome, x, y);
+  if (modo === 'anfitriao') eventos.push({ s: [nome, x == null ? null : Math.round(x), y == null ? null : Math.round(y)] });
 }
 
 // --- Música: valsinha de caixinha em lá menor. À noite desce uma oitava e fica mais lenta ---
@@ -448,7 +496,7 @@ function atualizarSom(dt) {
   ventoSom.f.frequency.setTargetAtTime(380 + ventoVis * 260 + Math.sin(tempo * 1.7) * 60, t, .3);
   if ((fase === 'dia' || fase === 'noite') && p.trabalhando && !p.caido) {
     tCavar -= dt;
-    if (tCavar <= 0) { tocarLocal('cavar', p.x); tCavar = .32; }
+    if (tCavar <= 0) { tocarLocal('cavar', p.x, p.y); tCavar = .32; }
   } else tCavar = 0;
 }
 
@@ -468,20 +516,30 @@ let modo = 'solo'; // solo | anfitriao | convidado
 let estado = 'titulo', estadoPausado = null;
 let dia = 1, dinheiro = 0, relogio = CFG.duracaoDia, tChegada = 0, tNoite = 0, tLimpa = 0;
 let nivelFerr = 0, nivelBota = 0, dono = [true], estoque = 0, meta = CFG.meta, tipoFim = null;
+let nivelProp = 0, nivelMochila = 0, nivelComb = { vida: 0, defesa: 0, ataque: 0, velAtaque: 0 };
+let ajudantes = [], idAjudante = 0, velJogo = 1, lojaAba = 'equipamento';
 let fila = [null, null, null, null], covas = [], lampioes = [], inimigos = [], flutuantes = [], agenda = [];
-let AREAS = [], mundoW = W, camX = 0, camDesenho = 0;
+let AREAS = [], mundoW = W, mundoH = H, camX = 0, camY = 0, camDX = 0, camDY = 0;
 let evento = null, eventoHoje = null, tChefe = null, moedas = [], perigos = [];
 let soltas = [], rajadas = [], folhas = [], ventoVis = 0;
 let stats = { ganho: 0, roubado: 0, recuperado: 0 }, idCorpo = 0, idInimigo = 0, idMoeda = 0;
 let escuro = 0.35, tremor = 0, tempo = 0, painelEm = 0;
 const novoJogador = (id, nome, cor) => ({
-  id, nome, cor, x: 184, y: 300, r: 14, dir: 0, carrega: null, vida: CFG.vidaMax, inv: 0, cdAtaque: 0, golpe: 0,
-  trabalhando: false, andando: false, caido: false, segurando: false, acaoSeq: 0, lampSeq: 0, compraSeq: 0, compraItem: '',
+  id, nome, cor, x: 184, y: 300, r: 14, dir: 0, carrega: null, itens: [], vida: CFG.vidaMax, inv: 0, cdAtaque: 0, golpe: 0,
+  trabalhando: false, andando: false, caido: false, segurando: false, acaoSeq: 0, lampSeq: 0, compraSeq: 0, compraItem: '', velSeq: 0, pularSeq: 0,
 });
 const p = novoJogador('eu', lerNome(), CORES[0]);
 let jogadores = [p];
 const ferramenta = () => CFG.ferramentas[nivelFerr];
 const bota = () => CFG.botas[nivelBota];
+const propaganda = () => CFG.propaganda[nivelProp];
+const capacidade = () => CFG.mochila[nivelMochila].itens;
+// cabe mais um item? o braço que leva defunto não segura item
+const cabeItem = q => q.itens.length < capacidade() - (q.carrega ? 1 : 0);
+const vidaMaxima = () => CFG.vidaMax + nivelComb.vida;
+const chanceDefesa = () => nivelComb.defesa * CFG.combate.defesa.por;
+const danoGolpe = () => ferramenta().dano * (1 + nivelComb.ataque * CFG.combate.ataque.por);
+const intervaloGolpe = () => CFG.intervaloGolpe * CFG.combate.velAtaque.por ** nivelComb.velAtaque;
 const teclas = new Set();
 const joy = { x: 0, y: 0 };
 let acaoToque = false;
@@ -490,7 +548,8 @@ let acaoToque = false;
 function ajustarAreas(n) {
   while (AREAS.length > n) { AREAS.pop(); covas.length -= 12; }
   while (AREAS.length < n) {
-    const ai = AREAS.length, a = { x: AREA.x0 + ai * AREA.passo, y: AREA.y, w: AREA.w, h: AREA.h };
+    const ai = AREAS.length, col = ai % AREA.colunas, fil = Math.floor(ai / AREA.colunas);
+    const a = { x: AREA.x0 + col * AREA.passo, y: AREA.y + fil * AREA.passoY, w: AREA.w, h: AREA.h };
     AREAS.push(a);
     for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) covas.push({
       area: ai, x: a.x + 30 + c * 58, y: a.y + 80 + r * 150, w: 38, h: 64,
@@ -500,18 +559,21 @@ function ajustarAreas(n) {
   }
   while (dono.length < n) dono.push(false);
   dono.length = n;
-  mundoW = Math.max(W, AREAS[n - 1].x + AREA.w + 14);
+  const ult = AREAS[n - 1];
+  mundoW = W;
+  mundoH = Math.max(H, ult.y + AREA.h + 40);
 }
-const areasVisiveis = () => dono.lastIndexOf(true) + 1 + CFG.terrenosAVenda;
+const areasVisiveis = () => Math.max(CFG.terrenosIniciais, dono.lastIndexOf(true) + 1 + CFG.terrenosAVenda);
 
 function novoJogo() {
   dia = 1; dinheiro = 0; nivelFerr = 0; nivelBota = 0; estoque = 0; relogio = CFG.duracaoDia; tipoFim = null;
+  nivelProp = 0; nivelMochila = 0; nivelComb = { vida: 0, defesa: 0, ataque: 0, velAtaque: 0 }; ajudantes = []; lojaAba = 'equipamento';
   fila = [null, null, null, null]; lampioes = []; inimigos = []; flutuantes = []; agenda = [];
-  evento = null; eventoHoje = null; tChefe = null; moedas = []; perigos = []; soltas = []; camX = 0;
+  evento = null; eventoHoje = null; tChefe = null; moedas = []; perigos = []; soltas = []; camX = 0; camY = 0;
   AREAS = []; covas = []; dono = [true];
   ajustarAreas(areasVisiveis());
   meta = metaPara(jogadores.length);
-  jogadores.forEach((q, i) => Object.assign(q, { x: 184, y: 250 + i * 34, dir: 0, carrega: null, vida: CFG.vidaMax, inv: 0, cdAtaque: 0, golpe: 0, caido: false, trabalhando: false }));
+  jogadores.forEach((q, i) => Object.assign(q, { x: 184, y: 250 + i * 34, dir: 0, carrega: null, itens: [], vida: vidaMaxima(), inv: 0, cdAtaque: 0, golpe: 0, caido: false, trabalhando: false }));
   stats = { ganho: 0, roubado: 0, recuperado: 0 };
   chegar('humano'); chegar('humano');
 }
@@ -561,7 +623,8 @@ function amanhecer() {
   inimigos.forEach(e => { if (e.tipo === 'zumbi') devolver(e); });
   inimigos = []; perigos = []; tChefe = null;
   covas.forEach(c => { c.levantarEm = null; });
-  jogadores.forEach(q => { q.vida = CFG.vidaMax; q.inv = 0; q.caido = false; });
+  jogadores.forEach(q => { q.vida = vidaMaxima(); q.inv = 0; q.caido = false; });
+  ajudantes.forEach(a => { a.vida = CFG.ajudantes.vida; });
   soltar();
   if (dia >= CFG.dias) { fim(dinheiro >= meta ? 'vitoria' : 'divida'); return; }
   dia++;
@@ -577,14 +640,29 @@ function fim(tipo) {
 function pausar() { if (modo !== 'solo') return; estadoPausado = estado; estado = 'pausa'; soltar(); renderPainel(); }
 function despausar() { estado = estadoPausado; subtela = null; renderPainel(); }
 
+// Tudo que a loja vende. Cada item diz o preço do próximo nível (null quando acabou) e o que acontece ao comprar
+const ITENS_LOJA = {
+  ferramenta: { preco: () => (CFG.ferramentas[nivelFerr + 1] || {}).preco, levar: () => { nivelFerr++; } },
+  bota: { preco: () => (CFG.botas[nivelBota + 1] || {}).preco, levar: () => { nivelBota++; } },
+  mochila: { preco: () => (CFG.mochila[nivelMochila + 1] || {}).preco, levar: () => { nivelMochila++; } },
+  lampiao: { preco: () => CFG.precoLampiao, levar: () => { estoque++; } },
+  propaganda: { preco: () => (CFG.propaganda[nivelProp + 1] || {}).preco, levar: () => { nivelProp++; } },
+  carregador: { preco: () => (contarAjudantes('carregador') < CFG.ajudantes.maxPorTipo ? CFG.ajudantes.carregador.preco : null), levar: () => contratar('carregador') },
+  zelador: { preco: () => (contarAjudantes('zelador') < CFG.ajudantes.maxPorTipo ? CFG.ajudantes.zelador.preco : null), levar: () => contratar('zelador') },
+};
+Object.keys(CFG.combate).forEach(k => {
+  ITENS_LOJA[k] = {
+    preco: () => CFG.combate[k].precos[nivelComb[k]],
+    levar: () => { nivelComb[k]++; if (k === 'vida') jogadores.forEach(q => { if (!q.caido) q.vida++; }); },
+  };
+});
+
 function comprar(item) {
-  if (item === 'ferramenta') {
-    const f = CFG.ferramentas[nivelFerr + 1];
-    if (f && dinheiro >= f.preco) { dinheiro -= f.preco; nivelFerr++; tocar('compra'); }
-  } else if (item === 'bota') {
-    const b = CFG.botas[nivelBota + 1];
-    if (b && dinheiro >= b.preco) { dinheiro -= b.preco; nivelBota++; tocar('compra'); }
-  } else if (item === 'lampiao' && dinheiro >= CFG.precoLampiao) { dinheiro -= CFG.precoLampiao; estoque++; tocar('compra'); }
+  const it = ITENS_LOJA[item];
+  if (!it) return;
+  const preco = it.preco();
+  if (preco == null || dinheiro < preco) return;
+  dinheiro -= preco; it.levar(); tocar('compra');
   if (estado === 'loja') mostrarLoja();
 }
 
@@ -698,6 +776,7 @@ function mostrarConfig() {
       ${barra('ambiente', 'Ambiente')}
       ${barra('efeitos', 'Efeitos')}
       <label class="ajuste-marca"><input type="checkbox" id="cfg-tremor"${config.tremor ? ' checked' : ''}> Tremer a tela com pancada e explosão</label>
+      <label class="ajuste-marca"><input type="checkbox" id="cfg-leve"${config.leve ? ' checked' : ''}> Modo leve: imagem mais simples, pra computador fraco</label>
     </div>
     <p class="nota">A música já tá tocando, é só mexer e ouvir. Nas barras de ambiente e efeitos, solta pra escutar um exemplo. Isso fica salvo só neste computador.</p>
     <div class="botoes">
@@ -731,23 +810,47 @@ function mostrarSala() {
   </div>`);
 }
 
+const ABAS_LOJA = [['equipamento', 'Equipamento'], ['cemiterio', 'Cemitério'], ['combate', 'Combate']];
+
 function mostrarLoja() {
-  const f = CFG.ferramentas[nivelFerr + 1], b = CFG.botas[nivelBota + 1];
-  const n = nLadroes();
-  const btn = (acao, preco) => `<button type="button" data-acao="${acao}"${dinheiro >= preco ? '' : ' disabled'}>$${preco}</button>`;
-  mostrarPainel(`<div class="cartao">
+  const n = nLadroes(), time = modo === 'solo' ? 'Você tem' : 'O time tem';
+  // uma linha da loja: nome, explicação e o botão com o preço do próximo nível (ou o texto de quando acabou)
+  const linha = (acao, nome, desc, acabou) => {
+    const preco = ITENS_LOJA[acao].preco();
+    if (preco == null) return `<li><div><b>${nome}</b><small>${acabou}</small></div></li>`;
+    return `<li><div><b>${nome}</b><small>${desc}</small></div><button type="button" data-acao="${acao}"${dinheiro >= preco ? '' : ' disabled'}>$${preco}</button></li>`;
+  };
+  const prox = (lista, nivel) => lista[nivel + 1] || lista[nivel];
+  const pips = (nivel, max) => `<span class="nivel" aria-label="nível ${nivel} de ${max}">${'●'.repeat(nivel)}${'○'.repeat(max - nivel)}</span>`;
+  const ajudante = tipo => {
+    const a = CFG.ajudantes[tipo], tem = contarAjudantes(tipo), max = CFG.ajudantes.maxPorTipo;
+    return linha(tipo, a.nome, `${a.desc} Anda devagar, demora em tudo e pode morrer. ${time} ${tem} de ${max}.`, `${time} ${max}, o máximo.`);
+  };
+  const abas = {
+    equipamento: () => [
+      linha('ferramenta', prox(CFG.ferramentas, nivelFerr).nome, prox(CFG.ferramentas, nivelFerr).desc, 'Não tem ferramenta melhor que essa.'),
+      linha('bota', prox(CFG.botas, nivelBota).nome, prox(CFG.botas, nivelBota).desc, 'Não tem bota mais rápida que essa.'),
+      linha('mochila', prox(CFG.mochila, nivelMochila).nome, prox(CFG.mochila, nivelMochila).desc, 'Não tem mochila maior que essa.'),
+      linha('lampiao', 'Lampião', `Ladrão não mexe em cova iluminada. Põe no chão com ${toque ? 'o botão Lampião' : '<kbd>Q</kbd>'}. ${time} ${estoque}.`, ''),
+    ],
+    cemiterio: () => [
+      linha('propaganda', prox(CFG.propaganda, nivelProp).nome, prox(CFG.propaganda, nivelProp).desc, 'Não tem propaganda melhor que essa.'),
+      ajudante('carregador'),
+      ajudante('zelador'),
+    ],
+    combate: () => Object.entries(CFG.combate).map(([k, c]) =>
+      linha(k, `${c.nome} ${pips(nivelComb[k], c.precos.length)}`, c.desc(nivelComb[k]), 'No máximo.')),
+  };
+  mostrarPainel(`<div class="cartao largo">
     <div><p class="sobre">Anoitecer do dia ${dia} de ${CFG.dias}</p><h2>Loja do coveiro</h2></div>
     <div class="saldo"><b>$${dinheiro}</b><span>no bolso · a prefeitura cobra $${meta} no amanhecer do dia ${CFG.dias + 1}</span></div>
     <div class="alerta">Hoje à noite ${n === 1 ? 'vem um ladrão' : 'vêm ' + n + ' ladrões'}.${ultimaNoite() ? ' O chefe deles vem junto, e cada pancada dele tira grana do seu bolso.' : ''}</div>
-    <ul class="loja">
-      ${f
-        ? `<li><div><b>${f.nome}</b><small>${f.desc}</small></div>${btn('ferramenta', f.preco)}</li>`
-        : `<li><div><b>${ferramenta().nome}</b><small>Não tem ferramenta melhor que essa.</small></div></li>`}
-      ${b
-        ? `<li><div><b>${b.nome}</b><small>${b.desc}</small></div>${btn('bota', b.preco)}</li>`
-        : `<li><div><b>${bota().nome}</b><small>Não tem bota mais rápida que essa.</small></div></li>`}
-      <li><div><b>Lampião</b><small>Ladrão não mexe em cova iluminada. Põe no chão com ${toque ? 'o botão Lampião' : '<kbd>Q</kbd>'}. ${modo === 'solo' ? 'Você tem' : 'O time tem'} ${estoque}.</small></div>${btn('lampiao', CFG.precoLampiao)}</li>
-    </ul>
+    <div class="loja-corpo">
+      <nav class="loja-abas" role="tablist" aria-label="Seções da loja">
+        ${ABAS_LOJA.map(([k, nome]) => `<button type="button" role="tab" data-acao="aba-${k}" aria-selected="${lojaAba === k}">${nome}</button>`).join('')}
+      </nav>
+      <ul class="loja">${abas[lojaAba]().join('')}</ul>
+    </div>
     ${modo !== 'convidado' ? '<button class="btn" type="button" data-acao="noite" data-principal>Encarar a noite</button>' : esperando('encarar a noite')}
   </div>`);
 }
@@ -810,13 +913,19 @@ $('#painel').addEventListener('click', e => {
   const b = e.target.closest('[data-acao]');
   if (!b || b.disabled || performance.now() - painelEm < 250) return;
   const acao = b.dataset.acao;
-  if (!['ferramenta', 'bota', 'lampiao'].includes(acao)) tocarLocal('clique');
+  const eCompra = Object.prototype.hasOwnProperty.call(ITENS_LOJA, acao);
+  if (!eCompra) tocarLocal('clique');
+  if (eCompra) {
+    if (modo === 'convidado') { p.compraSeq++; p.compraItem = acao; enviarEntrada(true); } else comprar(acao);
+    return;
+  }
+  if (acao.startsWith('aba-')) { lojaAba = acao.slice(4); mostrarLoja(); const a = $(`[data-acao="${acao}"]`); if (a) a.focus(); return; }
   switch (acao) {
     case 'tela-inicio': case 'tela-solo': case 'tela-multi': telaInicio = acao.slice(5); renderPainel(); break;
     case 'jogar-solo': modo = 'solo'; novoJogo(); comecarDia(); break;
     case 'config': subtela = 'config'; renderPainel(); break;
     case 'fechar-config': fecharConfig(); break;
-    case 'config-padrao': config = Object.assign({}, CONFIG_PADRAO); salvarConfig(); aplicarVolumes(); renderPainel(); break;
+    case 'config-padrao': config = Object.assign({}, CONFIG_PADRAO); salvarConfig(); aplicarVolumes(); aplicarLeve(); renderPainel(); break;
     case 'sair-menu': voltarInicio('inicio'); break;
     case 'sair-multi': voltarInicio('multi'); break;
     case 'criar': criarSala(); break;
@@ -829,11 +938,30 @@ $('#painel').addEventListener('click', e => {
     case 'reiniciar': novoJogo(); comecarDia(); break;
     case 'copiar': copiarLink(); break;
     case 'voltar': voltarInicio('multi'); break;
-    case 'ferramenta': case 'bota': case 'lampiao':
-      if (modo === 'convidado') { p.compraSeq++; p.compraItem = acao; enviarEntrada(true); } else comprar(acao);
-      break;
   }
 });
+
+// ===== Acelerar o jogo e pular a noite: qualquer coveiro pode (o convidado pede ao anfitrião) =====
+function alternarVelocidade(q) {
+  if (estado !== 'dia' && estado !== 'noite') return;
+  velJogo = velJogo === 1 ? CFG.velocidadeRapida : 1;
+  aviso(`${modo === 'solo' ? 'Velocidade' : q.nome + ' mudou a velocidade'}: ${velJogo === 1 ? 'normal' : String(velJogo).replace('.', ',') + 'x'}.`);
+}
+function pularNoite(q) {
+  if (estado !== 'noite') return;
+  aviso(modo === 'solo' ? 'Você pulou a noite.' : `${q.nome} pulou a noite.`);
+  amanhecer();
+}
+function pedirVelocidade() {
+  if (modo === 'convidado') { p.velSeq++; enviarEntrada(true); } else alternarVelocidade(p);
+}
+function pedirPular() {
+  if (modo === 'convidado') { p.pularSeq++; enviarEntrada(true); } else pularNoite(p);
+}
+// os botões do HUD não pegam foco, senão o Espaço de cavar apertaria o botão
+['btn-vel', 'btn-pular'].forEach(id => $('#' + id).addEventListener('mousedown', e => e.preventDefault()));
+$('#btn-vel').addEventListener('click', () => { tocarLocal('clique'); pedirVelocidade(); });
+$('#btn-pular').addEventListener('click', () => { tocarLocal('clique'); pedirPular(); });
 $('#painel').addEventListener('input', e => {
   if (e.target.id === 'nome') { p.nome = limparNome(e.target.value); salvarNome(p.nome); }
   const k = e.target.dataset.vol;
@@ -846,6 +974,7 @@ $('#painel').addEventListener('input', e => {
 $('#painel').addEventListener('change', e => {
   if (e.target.dataset.vol) somDeTeste(e.target.dataset.vol);
   if (e.target.id === 'cfg-tremor') { config.tremor = e.target.checked; salvarConfig(); }
+  if (e.target.id === 'cfg-leve') { config.leve = e.target.checked; config.leveAuto = false; salvarConfig(); aplicarLeve(); }
 });
 
 let avisoTimer = 0;
@@ -865,7 +994,7 @@ function avisoOutros(txt, q) {
   if (modo === 'anfitriao') eventos.push({ a: txt, exceto: q.id });
 }
 function flutua(x, y, txt, cor, q) {
-  const f = { x: Math.max(70, Math.min(mundoW - 70, x)), y: Math.max(56, Math.min(H - 20, y)), txt, cor, t: 0 };
+  const f = { x: Math.max(70, Math.min(mundoW - 70, x)), y: Math.max(56, Math.min(mundoH - 20, y)), txt, cor, t: 0 };
   if (!q || q === p) flutuantes.push(f);
   if (modo === 'anfitriao' && q !== p) eventos.push({ f: [Math.round(f.x), Math.round(f.y), txt, cor], para: q ? q.id : undefined });
 }
@@ -977,28 +1106,31 @@ function acaoPress(q) {
 
   if (a.tipo === 'slot') {
     const c = fila[a.i];
-    if (c && !leva) {
-      q.carrega = { tipo: 'corpo', corpo: c }; fila[a.i] = null; tocar('pop', q.x);
+    // defunto vai no braço: os itens que sobrarem precisam caber na mochila
+    if (c && !leva && q.itens.length <= capacidade() - 1) {
+      q.carrega = { tipo: 'corpo', corpo: c }; fila[a.i] = null; tocar('pop', q.x, q.y);
       aviso(`${c.nome} quer ${ITEM[c.pedido]}. ${c.especie === 'ogro' ? 'E precisa de cova grande.' : 'Cova pequena serve.'}`, q);
-    } else if (!c && leva && leva.tipo === 'corpo') {
-      fila[a.i] = leva.corpo; q.carrega = null; tocar('pop', q.x);
-    } else if (c && leva) {
+    } else if (!c && leva) {
+      fila[a.i] = leva.corpo; q.carrega = null; tocar('pop', q.x, q.y);
+    } else if (c) {
       flutua(q.x, q.y - 34, 'Mãos ocupadas', COR.osso, q);
     }
     return;
   }
 
   if (a.tipo === 'estande') {
-    if (leva && leva.tipo === 'corpo') { flutua(q.x, q.y - 34, 'Mãos ocupadas', COR.osso, q); return; }
-    if (leva && leva.item === a.item) { q.carrega = null; return; }
-    q.carrega = { tipo: 'item', item: a.item }; tocar('pop', q.x);
+    if (cabeItem(q)) q.itens.push(a.item);                                         // pega mais um
+    else if (q.itens.includes(a.item)) q.itens.splice(q.itens.lastIndexOf(a.item), 1); // cheio: devolve um
+    else if (q.itens.length) q.itens[q.itens.length - 1] = a.item;                  // cheio de outra coisa: troca
+    else { flutua(q.x, q.y - 34, 'Mãos ocupadas', COR.osso, q); return; }
+    tocar('pop', q.x, q.y);
     return;
   }
 
   if (a.tipo === 'placa') {
     const preco = CFG.precoTerreno(a.area), ar = AREAS[a.area];
     if (dinheiro >= preco) {
-      dinheiro -= preco; dono[a.area] = true; tocar('compra', q.x);
+      dinheiro -= preco; dono[a.area] = true; tocar('compra', q.x, q.y);
       ajustarAreas(areasVisiveis());
       flutua(ar.x + ar.w / 2, ar.y + ar.h / 2 - 40, `-$${preco}`, COR.ambar);
       aviso(`${modo === 'solo' ? 'Terreno comprado' : q.nome + ' comprou o terreno'}. Mais 12 covas de espaço.`);
@@ -1011,22 +1143,24 @@ function acaoPress(q) {
   if (leva && leva.tipo === 'corpo' && !c.corpo) {
     const req = CFG.profundidade[leva.corpo.especie];
     if (c.prof >= req) {
-      c.corpo = leva.corpo; q.carrega = null; c.fechada = false; c.fechar = 0; tocar('baque', c.x);
+      c.corpo = leva.corpo; q.carrega = null; c.fechada = false; c.fechar = 0; tocar('baque', c.x, c.y);
       flutua(c.x, c.y - 44, 'Na cova', COR.osso);
     } else {
       flutua(c.x, c.y - 44, c.prof < 1 ? 'Cava primeiro' : 'Pequena demais', COR.osso, q);
     }
     return;
   }
-  if (leva && leva.tipo === 'item' && c.corpo && c.fechada && c.enfeite !== c.corpo.pedido) {
-    if (leva.item === c.corpo.pedido) {
-      c.enfeite = leva.item; q.carrega = null; tocar('pop', c.x);
-      if (!c.gorjeta) { c.gorjeta = true; ganhar(CFG.gorjeta, c.x, c.y - 48); }
-      else flutua(c.x, c.y - 48, 'Enfeitada', COR.osso);
-    } else {
-      flutua(c.x, c.y - 48, `Queria ${ITEM[c.corpo.pedido]}`, COR.osso, q);
-    }
+  if (q.itens.length && c.corpo && c.fechada && c.enfeite !== c.corpo.pedido) {
+    const i = q.itens.indexOf(c.corpo.pedido);
+    if (i >= 0) { q.itens.splice(i, 1); enfeitar(c, c.corpo.pedido); }
+    else flutua(c.x, c.y - 48, `Queria ${ITEM[c.corpo.pedido]}`, COR.osso, q);
   }
+}
+
+// Rosa ou vela na cova certa: paga a gorjeta toda vez, inclusive quando é reposição
+function enfeitar(c, item) {
+  c.enfeite = item; c.gorjeta = true; tocar('pop', c.x, c.y);
+  ganhar(CFG.gorjeta, c.x, c.y - 48);
 }
 
 function segurar(q, dt, segura) {
@@ -1060,7 +1194,7 @@ function segurar(q, dt, segura) {
 }
 
 function ganhar(v, x, y) {
-  dinheiro += v; stats.ganho += v; tocar('moeda', x);
+  dinheiro += v; stats.ganho += v; tocar('moeda', x, y);
   flutua(x, y, `+$${v}`, COR.ambar);
 }
 
@@ -1068,14 +1202,14 @@ function colocarLampiao(q) {
   if (estado !== 'dia' && estado !== 'noite') return;
   if (estoque <= 0) { aviso('Acabou o lampião. Dá pra comprar mais no anoitecer.', q); return; }
   if (lampioes.some(l => Math.hypot(l.x - q.x, l.y - q.y) < 30)) { flutua(q.x, q.y - 34, 'Já tem um aqui', COR.osso, q); return; }
-  lampioes.push({ x: Math.round(q.x), y: Math.round(q.y + 4) }); estoque--; tocar('pop', q.x);
+  lampioes.push({ x: Math.round(q.x), y: Math.round(q.y + 4) }); estoque--; tocar('pop', q.x, q.y);
   flutua(q.x, q.y - 34, 'Lampião aceso', COR.ambar);
 }
 
 function atacar(q, e) {
   const a = Math.atan2(e.y - q.y, e.x - q.x), peso = e.peso == null ? 1 : e.peso;
-  e.vida -= ferramenta().dano * (1 - (e.defesa || 0)); e.flash = .12;
-  q.cdAtaque = .35; q.golpe = .16; q.dir = a; tocar('golpe', e.x);
+  e.vida -= danoGolpe() * (1 - (e.defesa || 0)); e.flash = .12;
+  q.cdAtaque = intervaloGolpe(); q.golpe = .16; q.dir = a; tocar('golpe', e.x, e.y);
   e.x += Math.cos(a) * 22 * peso; e.y += Math.sin(a) * 22 * peso;
   if (e.tipo === 'ladrao' && e.estado === 'roubando') e.prog = Math.max(0, e.prog - .35);
   if (e.vida <= 0) derrotar(e);
@@ -1088,7 +1222,7 @@ function derrotar(e) {
   soltarMoedas(e.x, e.y, trocado + e.saque, e.saque);
   if (e.tipo === 'chefe') {
     perigos = perigos.filter(h => h.tipo === 'estrepe' && h.t >= CFG.chefe.estrepes.voo);
-    efeito('explosao', e.x, e.y); tremer(.4); tocar('explosao', e.x);
+    efeito('explosao', e.x, e.y); tremer(.4); tocar('explosao', e.x, e.y);
     aviso('O chefão caiu! Corre pegar as moedas.');
   } else flutua(e.x, e.y - 30, e.saque > 0 ? 'Largou o saque!' : 'Fugiu!', COR.osso);
 }
@@ -1104,7 +1238,7 @@ function soltarMoedas(x, y, total, rec) {
     rec -= r;
     moedas.push({
       id: ++idMoeda, v, rec: r, t: 0, ox: x, oy: y,
-      x: Math.max(20, Math.min(mundoW - 20, x + Math.cos(a) * d)), y: Math.max(52, Math.min(H - 16, y + Math.sin(a) * d)),
+      x: Math.max(20, Math.min(mundoW - 20, x + Math.cos(a) * d)), y: Math.max(52, Math.min(mundoH - 16, y + Math.sin(a) * d)),
     });
   }
 }
@@ -1116,7 +1250,7 @@ function atualizarMoedas(dt) {
     const q = jogadores.find(o => !o.caido && Math.hypot(o.x - m.x, o.y - m.y) < CFG.moedas.pegar);
     if (!q) return;
     m.pega = true;
-    dinheiro += m.v; stats.recuperado += m.rec; stats.ganho += m.v - m.rec; tocar('moeda', m.x);
+    dinheiro += m.v; stats.recuperado += m.rec; stats.ganho += m.v - m.rec; tocar('moeda', m.x, m.y);
     flutua(m.x, m.y - 20, `+$${m.v}`, COR.ambar);
   });
   moedas = moedas.filter(m => !m.pega);
@@ -1124,7 +1258,8 @@ function atualizarMoedas(dt) {
 
 function ferir(q, d, fonte) {
   if (q.inv > 0 || q.caido || estado !== 'noite') return;
-  q.vida -= d; q.inv = .8; tremer(.25, q); tocar('dor', q.x);
+  if (Math.random() < chanceDefesa()) { q.inv = .4; tocar('defesa', q.x, q.y); flutua(q.x, q.y - 34, 'Aparou!', COR.osso); return; }
+  q.vida -= d; q.inv = .8; tremer(.25, q); tocar('dor', q.x, q.y);
   const a = Math.atan2(q.y - fonte.y, q.x - fonte.x);
   q.x += Math.cos(a) * 14; q.y += Math.sin(a) * 14; prender(q);
   flutua(q.x, q.y - 34, `-${d} de vida`, COR.sangue);
@@ -1141,15 +1276,15 @@ function novoLadrao() {
   const especie = Math.random() < CFG.chanceBrutamontes(dia) ? 'brutamontes' : 'comum';
   const t = CFG.ladrao[especie], vida = t.vida(dia);
   const lado = escolha(['direita', 'baixo', 'cima']);
-  const pos = lado === 'direita' ? { x: mundoW + 16, y: rnd(80, H - 40) }
-    : lado === 'baixo' ? { x: rnd(260, mundoW - 30), y: H + 16 }
+  const pos = lado === 'direita' ? { x: mundoW + 16, y: rnd(80, mundoH - 40) }
+    : lado === 'baixo' ? { x: rnd(260, mundoW - 30), y: mundoH + 16 }
     : { x: rnd(260, mundoW - 30), y: 18 };
   inimigos.push({
     id: ++idInimigo, tipo: 'ladrao', especie, x: pos.x, y: pos.y, r: t.r, vida, vidaMax: vida, vel: t.vel, dano: t.dano, peso: t.peso,
     defesa: CFG.defesa(dia), cura: CFG.cura(dia), estado: 'indo', alvo: null, prog: 0, saque: 0, cd: .6, flash: 0, dir: Math.PI,
   });
   const bruto = especie === 'brutamontes';
-  tocar('ladrao', pos.x);
+  tocar('ladrao', pos.x, pos.y);
   aviso(bruto ? 'Um brutamontes pulou o muro!' : 'Um ladrão pulou o muro!');
   flutua(pos.x, pos.y, bruto ? 'Brutamontes!' : 'Ladrão!', COR.sangue);
 }
@@ -1158,7 +1293,7 @@ function levantar(c) {
   const z = CFG.zumbi[c.corpo.especie];
   c.levantou = true; c.fechada = false; c.fechar = 0; c.enfeite = null;
   inimigos.push({ id: ++idInimigo, tipo: 'zumbi', especie: c.corpo.especie, x: c.x, y: c.y, r: z.r, vida: z.vida, vidaMax: z.vida, vel: z.vel, dano: z.dano, defesa: CFG.defesa(dia), cura: CFG.cura(dia), cova: c, cd: .8, flash: 0, dir: 0 });
-  flutua(c.x, c.y - 44, `${c.corpo.nome} levantou!`, COR.sangue); tocar('gemido', c.x);
+  flutua(c.x, c.y - 44, `${c.corpo.nome} levantou!`, COR.sangue); tocar('gemido', c.x, c.y);
   tremer(.2);
 }
 function devolver(z) { z.cova.levantou = false; }
@@ -1185,13 +1320,13 @@ function andarAte(e, tx, ty, passo) {
 }
 
 function saida(e) {
-  const op = [{ x: mundoW + 30, y: e.y }, { x: e.x, y: H + 30 }, { x: e.x, y: -30 }];
+  const op = [{ x: mundoW + 30, y: e.y }, { x: e.x, y: mundoH + 30 }, { x: e.x, y: -30 }];
   return op.reduce((m, o) => dist(o, e) < dist(m, e) ? o : m);
 }
 
 function roubar(e) {
   const c = e.alvo, v = Math.min(dinheiro, Math.round(CFG.roubo(dia) * (CFG.ladrao[e.especie] || CFG.ladrao.comum).roubo));
-  dinheiro -= v; e.saque = v; stats.roubado += v; tocar('roubo', c.x);
+  dinheiro -= v; e.saque = v; stats.roubado += v; tocar('roubo', c.x, c.y);
   c.fechada = false; c.fechar = 0; c.enfeite = null;
   flutua(c.x, c.y - 44, v > 0 ? `-$${v}` : 'Revirou a cova', COR.sangue);
   aviso(v > 0 ? `Levaram $${v}! Pega o ladrão antes que ele fuja.` : 'Um ladrão revirou uma cova.');
@@ -1205,10 +1340,10 @@ function atualizarInimigos(dt) {
     if (e.cura && e.vida < e.vidaMax) e.vida = Math.min(e.vidaMax, e.vida + e.cura * dt);
     if (e.tipo === 'chefe') { atualizarChefe(e, dt); continue; }
     if (e.tipo === 'zumbi') {
-      const q = coveiroMaisPerto(e);
+      const q = vitimaMaisPerto(e);
       if (!q) continue;
       andarAte(e, q.x, q.y, e.vel * dt);
-      if (dist(e, q) < e.r + q.r + 2 && e.cd <= 0) { e.cd = 1; ferir(q, e.dano, e); }
+      if (dist(e, q) < e.r + q.r + 2 && e.cd <= 0) { e.cd = 1; if (q.ajudante) ferirAjudante(q, e.dano, e); else ferir(q, e.dano, e); }
       continue;
     }
     if (e.estado === 'indo') {
@@ -1224,7 +1359,9 @@ function atualizarInimigos(dt) {
     }
     if (e.estado !== 'fugindo' && e.cd <= 0) {
       const q = jogadores.find(o => !o.caido && dist(o, e) < e.r + o.r + 6);
+      const aj = !q && ajudantes.find(o => !o.morto && dist(o, e) < e.r + o.r + 6);
       if (q) { e.cd = 1.4; ferir(q, e.dano || 1, e); }
+      else if (aj) { e.cd = 1.4; ferirAjudante(aj, e.dano || 1, e); }
     }
   }
   for (let i = 0; i < inimigos.length; i++) for (let j = i + 1; j < inimigos.length; j++) {
@@ -1238,17 +1375,137 @@ function atualizarInimigos(dt) {
   inimigos = inimigos.filter(e => !e.remover);
 }
 
+// ===== Ajudantes: carregador leva defunto até cova cavada; zelador repõe rosa e vela =====
+// Andam devagar, demoram CFG.ajudantes.tempoAcao em cada coisa que pegam ou largam, e bicho pode matar
+const NOMES_AJUDANTE = ['Zé Pá', 'Tonhão', 'Dona Lurdes', 'Nico', 'Magrão', 'Tião', 'Dona Cida', 'Juca', 'Bigode', 'Dona Neide'];
+const contarAjudantes = tipo => ajudantes.filter(a => a.tipo === tipo).length;
+function contratar(tipo) {
+  const usados = new Set(ajudantes.map(a => a.nome)), livres = NOMES_AJUDANTE.filter(n => !usados.has(n));
+  const a = { id: ++idAjudante, ajudante: true, tipo, nome: escolha(livres.length ? livres : NOMES_AJUDANTE), x: 186, y: 300, r: 11, dir: 0,
+    vida: CFG.ajudantes.vida, inv: 0, carrega: null, tarefa: null, acao: 0, andando: false };
+  ajudantes.push(a);
+  Object.assign(a, pontoDeEspera(a));
+}
+// cada um espera num lugar: carregador do lado da carroça, zelador perto das bancas
+function pontoDeEspera(a) {
+  const i = ajudantes.filter(o => o.tipo === a.tipo).indexOf(a);
+  return a.tipo === 'carregador' ? { x: 186, y: 140 + i * 46 } : { x: 196, y: 440 - i * 46 };
+}
+const covaServe = (c, corpo) => c && dono[c.area] && !c.corpo && !c.levantou && c.prof >= CFG.profundidade[corpo.especie];
+const covaPede = (c, item) => c && dono[c.area] && c.corpo && c.fechada && !c.levantou && c.enfeite !== c.corpo.pedido && (!item || c.corpo.pedido === item);
+const reservada = (c, a) => ajudantes.some(o => o !== a && o.tarefa && o.tarefa.cova === c);
+const maisPerto = (lista, ref) => lista.reduce((m, c) => (!m || dist(c, ref) < dist(m, ref) ? c : m), null);
+
+function planejar(a) {
+  // carregando alguma coisa: termina o serviço com ela
+  if (a.carrega && a.carrega.tipo === 'corpo') {
+    const c = maisPerto(covas.filter(o => covaServe(o, a.carrega.corpo) && !reservada(o, a)), a);
+    return c ? { etapa: 'levar', cova: c } : fila.includes(null) ? { etapa: 'devolver' } : null;
+  }
+  if (a.carrega) {
+    const c = maisPerto(covas.filter(o => covaPede(o, a.carrega.item) && !reservada(o, a)), a);
+    if (!c) a.carrega = null; // ninguém mais quer: larga
+    return c ? { etapa: 'enfeitar', cova: c } : null;
+  }
+  if (a.tipo === 'zelador') {
+    const c = maisPerto(covas.filter(o => covaPede(o) && !reservada(o, a)), ESTANDES[0]);
+    return c ? { etapa: 'pegar', item: c.corpo.pedido, cova: c } : null;
+  }
+  const livres = covas.filter(o => dono[o.area] && !o.corpo && !o.levantou && o.prof >= 1 && !reservada(o, a));
+  for (let i = 0; i < fila.length; i++) {
+    const corpo = fila[i];
+    if (!corpo || ajudantes.some(o => o !== a && o.tarefa && o.tarefa.etapa === 'buscar' && o.tarefa.slot === i)) continue;
+    const req = CFG.profundidade[corpo.especie], ok = livres.filter(c => c.prof >= req);
+    if (!ok.length) continue;
+    // humano fica com cova pequena quando dá, pra sobrar cova grande pro ogro
+    ok.sort((c1, c2) => (req === 1 ? (c1.prof >= 2) - (c2.prof >= 2) : 0) || dist(c1, SLOTS[i]) - dist(c2, SLOTS[i]));
+    return { etapa: 'buscar', slot: i, id: corpo.id, cova: ok[0] };
+  }
+  return null;
+}
+// o serviço ainda faz sentido? (outro coveiro pode ter chegado antes)
+function tarefaSegue(a) {
+  const t = a.tarefa;
+  if (t.etapa === 'buscar') return fila[t.slot] && fila[t.slot].id === t.id && covaServe(t.cova, fila[t.slot]);
+  if (t.etapa === 'levar') return a.carrega && covaServe(t.cova, a.carrega.corpo);
+  if (t.etapa === 'devolver') return a.carrega && fila.includes(null);
+  if (t.etapa === 'pegar') return covaPede(t.cova, t.item);
+  if (t.etapa === 'enfeitar') return a.carrega && covaPede(t.cova, a.carrega.item);
+  return false;
+}
+function destino(a) {
+  const t = a.tarefa;
+  if (t.etapa === 'buscar') return { x: SLOTS[t.slot].x + 60, y: SLOTS[t.slot].y };
+  if (t.etapa === 'devolver') { const s = SLOTS[Math.max(0, fila.indexOf(null))]; return { x: s.x + 60, y: s.y }; }
+  if (t.etapa === 'pegar') { const s = ESTANDES.find(o => o.item === t.item); return { x: s.x, y: s.y - 36 }; }
+  return { x: t.cova.x, y: t.cova.y + t.cova.h / 2 + 12 };
+}
+function concluir(a) {
+  const t = a.tarefa;
+  if (!t || !tarefaSegue(a)) { a.tarefa = null; return; }
+  if (t.etapa === 'buscar') {
+    a.carrega = { tipo: 'corpo', corpo: fila[t.slot] }; fila[t.slot] = null; t.etapa = 'levar';
+    tocar('pop', a.x, a.y);
+  } else if (t.etapa === 'levar') {
+    const c = t.cova;
+    c.corpo = a.carrega.corpo; c.fechada = false; c.fechar = 0; a.carrega = null; a.tarefa = null;
+    tocar('baque', c.x, c.y); flutua(c.x, c.y - 44, 'Na cova', COR.osso);
+  } else if (t.etapa === 'devolver') {
+    fila[fila.indexOf(null)] = a.carrega.corpo; a.carrega = null; a.tarefa = null;
+  } else if (t.etapa === 'pegar') {
+    a.carrega = { tipo: 'item', item: t.item }; t.etapa = 'enfeitar';
+    tocar('pop', a.x, a.y);
+  } else if (t.etapa === 'enfeitar') {
+    enfeitar(t.cova, a.carrega.item); a.carrega = null; a.tarefa = null;
+  }
+}
+function atualizarAjudantes(dt) {
+  ajudantes.forEach(a => {
+    a.inv = Math.max(0, a.inv - dt); a.andando = false;
+    if (a.acao > 0) { a.acao -= dt; if (a.acao <= 0) { a.acao = 0; concluir(a); } return; }
+    if (a.tarefa && !tarefaSegue(a)) a.tarefa = null;
+    if (!a.tarefa) a.tarefa = planejar(a);
+    const alvo = a.tarefa ? destino(a) : pontoDeEspera(a);
+    const ogro = a.carrega && a.carrega.tipo === 'corpo' && a.carrega.corpo.especie === 'ogro';
+    const chegou = andarAte(a, alvo.x, alvo.y, CFG.ajudantes.vel * (ogro ? .7 : 1) * dt);
+    a.andando = !chegou;
+    if (chegou && a.tarefa) a.acao = CFG.ajudantes.tempoAcao;
+  });
+  ajudantes = ajudantes.filter(a => !a.morto);
+}
+function ferirAjudante(a, d, fonte) {
+  if (a.inv > 0 || a.morto || estado !== 'noite') return;
+  a.vida -= d; a.inv = .8; tocar('dor', a.x, a.y);
+  const ang = Math.atan2(a.y - fonte.y, a.x - fonte.x);
+  a.x += Math.cos(ang) * 12; a.y += Math.sin(ang) * 12; prender(a);
+  flutua(a.x, a.y - 30, `-${d} de vida`, COR.sangue);
+  if (a.vida > 0) return;
+  a.morto = true;
+  if (a.carrega && a.carrega.tipo === 'corpo') { const i = fila.indexOf(null); if (i >= 0) fila[i] = a.carrega.corpo; }
+  // morreu no serviço e vira freguês, se couber na carroça
+  const i = fila.indexOf(null);
+  if (i >= 0) fila[i] = { id: ++idCorpo, especie: 'humano', nome: a.nome, pedido: Math.random() < .5 ? 'rosa' : 'vela' };
+  aviso(i >= 0 ? `${a.nome} morreu no serviço. Tá na carroça.` : `${a.nome} morreu no serviço.`);
+  tocar('gemido', a.x, a.y);
+}
+// morto que levanta vai atrás de quem estiver mais perto: coveiro ou ajudante
+function vitimaMaisPerto(e) {
+  let m = coveiroMaisPerto(e), md = m ? dist(m, e) : Infinity;
+  ajudantes.forEach(a => { if (!a.morto && dist(a, e) < md) { md = dist(a, e); m = a; } });
+  return m;
+}
+
 // ===== Chefão: anda atrás do coveiro mais perto e alterna ataques que avisam antes =====
 function novoChefe() {
-  const cf = CFG.chefe, q = coveiroMaisPerto({ x: mundoW / 2, y: H / 2 }) || p;
+  const cf = CFG.chefe, q = escolha(jogadores.filter(o => !o.caido)) || p;
   const vida = Math.round(cf.vida * (0.6 + 0.4 * jogadores.length));
-  const x = Math.max(260, Math.min(mundoW - 60, q.x + rnd(-140, 140)));
+  const x = Math.max(260, Math.min(mundoW - 60, q.x + rnd(-140, 140))), y0 = Math.max(6, q.y - 280);
   inimigos.push({
-    id: ++idInimigo, tipo: 'chefe', especie: '', x, y: 6, r: cf.r, vida, vidaMax: vida, vel: cf.vel, peso: 0,
+    id: ++idInimigo, tipo: 'chefe', especie: '', x, y: y0, r: cf.r, vida, vidaMax: vida, vel: cf.vel, peso: 0,
     defesa: CFG.defesa(dia), cura: CFG.cura(dia) / 2, estado: 'andando', prog: 0, saque: 0, cd: 2.5, cdGolpe: 0, flash: 0, dir: Math.PI / 2, ultimo: '',
   });
-  aviso('O chefe dos ladrões pulou o muro!'); tremer(.5); tocar('chefe', x);
-  flutua(x, 70, 'Chefão!', COR.sangue);
+  aviso('O chefe dos ladrões pulou o muro!'); tremer(.5); tocar('chefe', x, y0);
+  flutua(x, y0 + 64, 'Chefão!', COR.sangue);
 }
 
 function atualizarChefe(e, dt) {
@@ -1259,7 +1516,7 @@ function atualizarChefe(e, dt) {
   if (e.estado === 'andando') {
     const d = dist(e, q);
     if (d > e.r + q.r + 8) andarAte(e, q.x, q.y, e.vel * dt); else mirar();
-    if (d < e.r + q.r + cf.golpe.alcance && e.cdGolpe <= 0) { e.estado = 'golpe'; e.prog = 0; mirar(); tocar('alerta', e.x); }
+    if (d < e.r + q.r + cf.golpe.alcance && e.cdGolpe <= 0) { e.estado = 'golpe'; e.prog = 0; mirar(); tocar('alerta', e.x, e.y); }
     else if (e.cd <= 0) comecarAtaque(e, q);
   } else if (e.estado === 'golpe') {
     e.prog += dt / cf.golpe.preparo;
@@ -1278,8 +1535,8 @@ function atualizarChefe(e, dt) {
   } else if (e.estado === 'investindo') {
     const passo = Math.min(e.resta, cf.investida.vel * dt);
     e.x += Math.cos(e.dir) * passo; e.y += Math.sin(e.dir) * passo; e.resta -= passo;
-    const bateu = e.x < e.r || e.x > mundoW - e.r || e.y < 40 + e.r || e.y > H - e.r;
-    e.x = Math.max(e.r, Math.min(mundoW - e.r, e.x)); e.y = Math.max(40 + e.r, Math.min(H - e.r, e.y));
+    const bateu = e.x < e.r || e.x > mundoW - e.r || e.y < 40 + e.r || e.y > mundoH - e.r;
+    e.x = Math.max(e.r, Math.min(mundoW - e.r, e.x)); e.y = Math.max(40 + e.r, Math.min(mundoH - e.r, e.y));
     jogadores.forEach(o => {
       if (o.caido || e.acertou.includes(o.id) || dist(o, e) > e.r + o.r) return;
       e.acertou.push(o.id); ferir(o, cf.investida.dano, e);
@@ -1300,13 +1557,13 @@ function comecarAtaque(e, q) {
   const cf = CFG.chefe, a = escolha(['bombas', 'investida', 'estrepes'].filter(x => x !== e.ultimo));
   e.ultimo = a; e.prog = 0;
   e.cd = rnd(cf.intervalo[0], cf.intervalo[1]);
-  if (a === 'investida') { tocar('alerta', e.x); e.estado = 'mirando'; e.dir = Math.atan2(q.y - e.y, q.x - e.x); e.cd += cf.investida.mira + cf.investida.tonto; }
+  if (a === 'investida') { tocar('alerta', e.x, e.y); e.estado = 'mirando'; e.dir = Math.atan2(q.y - e.y, q.x - e.x); e.cd += cf.investida.mira + cf.investida.tonto; }
   else { e.estado = 'arremessando'; e.jogar = a; }
 }
 
 function arremessar(e, a, q) {
   const cf = CFG.chefe, ox = e.x, oy = e.y - e.r;
-  tocar('arremesso', e.x);
+  tocar('arremesso', e.x, e.y);
   if (a === 'bombas') {
     const n = cf.bombas.n + Math.max(0, jogadores.length - 1);
     for (let i = 0; i < n; i++) {
@@ -1322,7 +1579,7 @@ function arremessar(e, a, q) {
   }
 }
 const prenderX = x => Math.max(20, Math.min(mundoW - 20, x));
-const prenderY = y => Math.max(56, Math.min(H - 16, y));
+const prenderY = y => Math.max(56, Math.min(mundoH - 16, y));
 
 function atualizarPerigos(dt) {
   const cf = CFG.chefe;
@@ -1331,13 +1588,16 @@ function atualizarPerigos(dt) {
     if (h.tipo === 'bomba') {
       if (h.t < h.dur) return;
       h.fim = true;
-      efeito('explosao', h.x, h.y); tremer(.15); tocar('explosao', h.x);
+      efeito('explosao', h.x, h.y); tremer(.15); tocar('explosao', h.x, h.y);
       jogadores.forEach(o => { if (!o.caido && Math.hypot(o.x - h.x, o.y - h.y) < cf.bombas.raio + o.r * .5) ferir(o, cf.bombas.dano, h); });
+      ajudantes.forEach(a => { if (!a.morto && Math.hypot(a.x - h.x, a.y - h.y) < cf.bombas.raio + a.r * .5) ferirAjudante(a, cf.bombas.dano, h); });
     } else {
       if (h.t >= h.dur) { h.fim = true; return; }
       if (h.t < cf.estrepes.voo) return;
       const o = jogadores.find(q => !q.caido && q.inv <= 0 && Math.hypot(q.x - h.x, q.y - h.y) < q.r + 6);
+      const aj = !o && ajudantes.find(a => !a.morto && a.inv <= 0 && Math.hypot(a.x - h.x, a.y - h.y) < a.r + 6);
       if (o) { h.fim = true; ferir(o, cf.estrepes.dano, h); }
+      else if (aj) { h.fim = true; ferirAjudante(aj, cf.estrepes.dano, h); }
     }
   });
   perigos = perigos.filter(h => !h.fim);
@@ -1430,15 +1690,16 @@ function atualizarSoltas(dt) {
 }
 
 function atualizarCamera(dt) {
-  const alvo = Math.max(0, Math.min(mundoW - W, p.x - W / 2));
-  camX += (alvo - camX) * Math.min(1, dt * 6);
-  if (Math.abs(alvo - camX) < .3) camX = alvo;
+  const ax = Math.max(0, Math.min(mundoW - W, p.x - W / 2)), ay = Math.max(0, Math.min(mundoH - H, p.y - H / 2)), k = Math.min(1, dt * 6);
+  camX += (ax - camX) * k; camY += (ay - camY) * k;
+  if (Math.abs(ax - camX) < .3) camX = ax;
+  if (Math.abs(ay - camY) < .3) camY = ay;
 }
 
 // ===== Atualização =====
 function prender(q) {
   q.x = Math.max(q.r, Math.min(mundoW - q.r, q.x));
-  q.y = Math.max(46, Math.min(H - q.r, q.y));
+  q.y = Math.max(46, Math.min(mundoH - q.r, q.y));
 }
 
 function mover(dt) {
@@ -1490,10 +1751,11 @@ function atualizar(dt) {
   mover(dt);
   jogadores.forEach(q => segurar(q, dt, q === p ? segurando() : q.segurando));
   atualizarMoedas(dt);
+  atualizarAjudantes(dt);
 
   if (estado === 'dia') {
     tChegada += dt;
-    if (tChegada >= CFG.intervaloChegada / (0.5 + 0.5 * jogadores.length)) {
+    if (tChegada >= CFG.intervaloChegada * propaganda().fator / (0.5 + 0.5 * jogadores.length)) {
       tChegada = 0;
       if (chegar()) flutua(96, 96, 'Chegou defunto', COR.osso);
     }
@@ -1523,6 +1785,8 @@ function atualizar(dt) {
 // ===== Rede: partida online com conexão direta entre navegadores (PeerJS) =====
 const PREFIXO = 'coveiro-jogo-';
 let peer = null, conexaoAnfitriao = null, codigoSala = '', eventos = [], ultimoEnvio = 0, ultimoMundo = 0, assinatura = '';
+// Os pacotes andam sem ordem (um perdido não segura os seguintes), então cada um leva um número e o velho não desfaz o novo
+let seqMundo = 0, ultimoMundoN = 0, seqEntrada = 0, pingMs = 0;
 const conexoes = new Map();
 
 function carregarPeer() {
@@ -1554,7 +1818,7 @@ function voltarInicio(tela = 'inicio') {
   peer = null; conexaoAnfitriao = null; conexoes.clear(); codigoSala = ''; salaUrl = '';
   modo = 'solo'; p.id = 'eu'; jogadores = [p];
   try { if (location.search) history.replaceState(null, '', location.pathname); } catch (e) { /* sem histórico */ }
-  estado = 'titulo'; telaInicio = tela; subtela = null; soltar(); novoJogo(); renderPainel();
+  estado = 'titulo'; telaInicio = tela; subtela = null; velJogo = 1; soltar(); novoJogo(); renderPainel();
 }
 
 async function criarSala() {
@@ -1606,7 +1870,11 @@ function sair(id) {
 
 function receberDoConvidado(id, d) {
   const q = conexoes.get(id);
+  if (q && d && d.t === 'ping') { try { q.conn.send({ t: 'pong', k: d.k }); } catch (e) { /* conexão caindo */ } return; }
   if (!q || !d || d.t !== 'in') return;
+  // pacote que chegou depois de um mais novo: a posição dele já passou; os pedidos contam por número, então seguem valendo
+  const velho = Number.isInteger(d.k) && d.k <= (q.ultimaEntrada || 0);
+  if (Number.isInteger(d.k) && !velho) q.ultimaEntrada = d.k;
   if (typeof d.n === 'string') {
     const nome = limparNome(d.n);
     if (nome !== q.nome) {
@@ -1616,16 +1884,19 @@ function receberDoConvidado(id, d) {
     }
     q.apresentado = true;
   }
-  if (!q.caido && Number.isFinite(d.x) && Number.isFinite(d.y)) {
+  if (!velho && !q.caido && Number.isFinite(d.x) && Number.isFinite(d.y)) {
     q.x = d.x; q.y = d.y; prender(q);
     q.dir = Number.isFinite(d.dir) ? d.dir : 0; q.andando = !!d.an;
   }
-  q.segurando = !!d.seg;
+  if (!velho) q.segurando = !!d.seg;
   if (Number.isInteger(d.a) && d.a > q.acaoSeq) { const n = Math.min(3, d.a - q.acaoSeq); q.acaoSeq = d.a; for (let k = 0; k < n; k++) acaoPress(q); }
   if (Number.isInteger(d.l) && d.l > q.lampSeq) { q.lampSeq = d.l; colocarLampiao(q); }
   if (Array.isArray(d.c) && Number.isInteger(d.c[0]) && d.c[0] > q.compraSeq) {
     q.compraSeq = d.c[0];
-    if (estado === 'loja' && ['ferramenta', 'bota', 'lampiao'].includes(d.c[1])) comprar(d.c[1]);
+    if (estado === 'loja' && Object.prototype.hasOwnProperty.call(ITENS_LOJA, d.c[1])) comprar(d.c[1]);
+  }
+  if (Number.isInteger(d.v) && d.v > q.velSeq) { q.velSeq = d.v; alternarVelocidade(q); }
+  if (Number.isInteger(d.pn) && d.pn > q.pularSeq) { q.pularSeq = d.pn; pularNoite(q);
   }
 }
 
@@ -1633,7 +1904,8 @@ const r2 = v => Math.round(v * 100) / 100;
 function fotoMundo() {
   return {
     t: 'mundo', estado: estado === 'pausa' ? estadoPausado : estado, dia, dinheiro, meta, relogio: Math.round(relogio * 10) / 10,
-    nivelFerr, nivelBota, dono, estoque, tipoFim, stats, codigo: codigoSala, fila, lampioes,
+    nivelFerr, nivelBota, nivelProp, nivelMochila, nivelComb, velJogo, dono, estoque, tipoFim, stats, codigo: codigoSala, fila, lampioes,
+    ajudantes: ajudantes.map(a => [a.id, a.tipo, a.nome, Math.round(a.x), Math.round(a.y), r2(a.dir), a.carrega, a.vida, a.andando ? 1 : 0, a.acao > 0 ? r2(1 - a.acao / CFG.ajudantes.tempoAcao) : 0, a.inv > 0 ? 1 : 0]),
     evento: evento ? [evento.tipo, evento.etapa, Math.round(evento.frente || 0)] : null,
     moedas: moedas.map(m => [m.id, Math.round(m.x), Math.round(m.y), Math.round(m.ox), Math.round(m.oy), r2(m.t)]),
     perigos: perigos.map(h => [h.tipo, Math.round(h.x), Math.round(h.y), Math.round(h.ox), Math.round(h.oy), r2(h.t), r2(h.dur)]),
@@ -1641,7 +1913,7 @@ function fotoMundo() {
       ? [r2(c.prof), c.corpo, c.fechada ? 1 : 0, r2(c.fechar), c.enfeite, c.levantou ? 1 : 0, c.levantarEm != null && c.levantarEm < 2.2 ? 1 : 0, c.pago ? 1 : 0]
       : 0),
     inimigos: inimigos.filter(e => !e.remover).map(e => [e.id, e.tipo, e.especie || '', Math.round(e.x), Math.round(e.y), e.r, r2(e.vida), e.estado || '', r2(e.prog || 0), e.saque || 0, r2(e.dir), e.flash > 0 ? 1 : 0, r2(e.vidaMax || e.vida)]),
-    jogadores: jogadores.map(q => [q.id, q.nome, q.cor, Math.round(q.x), Math.round(q.y), r2(q.dir), q.carrega, q.vida, q.caido ? 1 : 0, q.golpe > 0 ? 1 : 0, q.trabalhando ? 1 : 0, q.andando ? 1 : 0, q.inv > 0 ? 1 : 0]),
+    jogadores: jogadores.map(q => [q.id, q.nome, q.cor, Math.round(q.x), Math.round(q.y), r2(q.dir), q.carrega, q.vida, q.caido ? 1 : 0, q.golpe > 0 ? 1 : 0, q.trabalhando ? 1 : 0, q.andando ? 1 : 0, q.inv > 0 ? 1 : 0, q.itens]),
     ev: eventos,
   };
 }
@@ -1653,6 +1925,7 @@ function enviarMundo() {
   if (agora - ultimoMundo < 66) return;
   ultimoMundo = agora;
   const m = fotoMundo();
+  m.n = ++seqMundo;
   eventos = [];
   conexoes.forEach(q => { if (q.conn && q.conn.open) { try { q.conn.send(m); } catch (e) { /* conexão caindo */ } } });
 }
@@ -1666,17 +1939,22 @@ async function entrarSala(codigo) {
   const este = peer = new Peer();
   const limite = setTimeout(() => { if (peer === este && modo !== 'convidado') erroRede(`Não achei a sala ${codigo}. Confere o código ou pede um link novo.`); }, 15000);
   este.on('open', () => {
-    const conn = este.connect(PREFIXO + codigo, { serialization: 'json', reliable: true });
+    // reliable:false no PeerJS é só "sem ordem": o pacote perdido ainda é reenviado, mas não trava os que vêm depois
+    const conn = este.connect(PREFIXO + codigo, { serialization: 'json', reliable: false });
     conn.on('open', () => { conexaoAnfitriao = conn; codigoSala = codigo; enviarEntrada(true); });
     conn.on('data', d => {
       if (!d || peer !== este) return;
       if (d.t === 'bem') {
         clearTimeout(limite);
-        modo = 'convidado'; p.id = d.id; jogadores = [p]; assinatura = '';
+        modo = 'convidado'; p.id = d.id; jogadores = [p]; assinatura = ''; ultimoMundoN = 0; pingMs = 0;
         estado = 'sala'; renderPainel();
       } else if (d.t === 'cheia') {
         clearTimeout(limite); erroRede('Essa sala já tá lotada, com 4 coveiros.');
       } else if (d.t === 'mundo' && modo === 'convidado') aplicarMundo(d);
+      else if (d.t === 'pong' && Number.isFinite(d.k)) {
+        const ida = performance.now() - d.k;
+        pingMs = Math.round(pingMs ? pingMs * .7 + ida * .3 : ida);
+      }
     });
     conn.on('close', () => { if (peer === este && modo === 'convidado') { modo = 'solo'; estado = 'conexao'; mostrarMensagem('Quem criou a sala saiu', 'Ou caiu da internet. Sem ele a partida acaba pra todo mundo.', 'Voltar'); } });
   });
@@ -1694,17 +1972,29 @@ function enviarEntrada(ja) {
   if (!ja && agora - ultimoEnvio < 50) return;
   ultimoEnvio = agora;
   try {
-    conexaoAnfitriao.send({ t: 'in', n: p.nome, x: Math.round(p.x), y: Math.round(p.y), dir: r2(p.dir), an: p.andando ? 1 : 0, seg: segurando() ? 1 : 0, a: p.acaoSeq, l: p.lampSeq, c: [p.compraSeq, p.compraItem] });
+    conexaoAnfitriao.send({ t: 'in', k: ++seqEntrada, n: p.nome, x: Math.round(p.x), y: Math.round(p.y), dir: r2(p.dir), an: p.andando ? 1 : 0, seg: segurando() ? 1 : 0, a: p.acaoSeq, l: p.lampSeq, c: [p.compraSeq, p.compraItem], v: p.velSeq, pn: p.pularSeq });
   } catch (e) { /* conexão caindo */ }
 }
 
+// O convidado mede o ping a cada 2 s (ida e volta até o anfitrião) e mostra no HUD
+setInterval(() => {
+  if (modo !== 'convidado' || !conexaoAnfitriao || !conexaoAnfitriao.open) return;
+  try { conexaoAnfitriao.send({ t: 'ping', k: performance.now() }); } catch (e) { /* conexão caindo */ }
+}, 2000);
+
 function aplicarMundo(m) {
+  // pacote mais velho que o último aplicado: o estado dele já passou, só os avisos, sons e efeitos valem
+  if (Number.isInteger(m.n)) { if (m.n <= ultimoMundoN) { aplicarEventos(m.ev); return; } ultimoMundoN = m.n; }
   const antes = estado;
   estado = m.estado; dia = m.dia; dinheiro = m.dinheiro; meta = m.meta; relogio = m.relogio;
-  nivelFerr = m.nivelFerr; nivelBota = m.nivelBota || 0; estoque = m.estoque; tipoFim = m.tipoFim; stats = m.stats; codigoSala = m.codigo;
+  nivelFerr = m.nivelFerr; nivelBota = m.nivelBota || 0; nivelProp = m.nivelProp || 0; nivelMochila = m.nivelMochila || 0; velJogo = m.velJogo || 1;
+  if (m.nivelComb) nivelComb = m.nivelComb; estoque = m.estoque; tipoFim = m.tipoFim; stats = m.stats; codigoSala = m.codigo;
   fila = m.fila; lampioes = m.lampioes;
   dono = m.dono.slice(); ajustarAreas(dono.length);
   evento = m.evento ? { tipo: m.evento[0], etapa: m.evento[1], frente: m.evento[2] } : null;
+  const velhosA = new Map(ajudantes.map(a => [a.id, a]));
+  ajudantes = (m.ajudantes || []).map(v => Object.assign(velhosA.get(v[0]) || { x: v[3], y: v[4], ajudante: true, r: 11 },
+    { id: v[0], tipo: v[1], nome: limparNome(v[2]), alvoX: v[3], alvoY: v[4], dir: v[5], carrega: v[6], vida: v[7], andando: !!v[8], prog: v[9], inv: v[10] ? .5 : 0 }));
   moedas = (m.moedas || []).map(v => ({ id: v[0], x: v[1], y: v[2], ox: v[3], oy: v[4], t: v[5] }));
   perigos = (m.perigos || []).map(v => ({ tipo: v[0], x: v[1], y: v[2], ox: v[3], oy: v[4], t: v[5], dur: v[6] }));
   m.covas.forEach((v, i) => {
@@ -1724,27 +2014,32 @@ function aplicarMundo(m) {
     const eu = v[0] === p.id;
     if (eu && comecou) { p.x = v[3]; p.y = v[4]; }
     const q = eu ? p : (velhosJ.get(v[0]) || Object.assign(novoJogador(v[0], v[1], v[2]), { x: v[3], y: v[4] }));
-    Object.assign(q, { cor: corSegura(v[2]), carrega: v[6], vida: v[7], caido: !!v[8], golpe: v[9] ? .1 : 0, trabalhando: !!v[10], inv: v[12] ? .5 : 0 });
+    Object.assign(q, { cor: corSegura(v[2]), carrega: v[6], vida: v[7], caido: !!v[8], golpe: v[9] ? .1 : 0, trabalhando: !!v[10], inv: v[12] ? .5 : 0, itens: Array.isArray(v[13]) ? v[13] : [] });
     if (!eu) Object.assign(q, { nome: limparNome(v[1]), alvoX: v[3], alvoY: v[4], dir: v[5], andando: !!v[11] });
     return q;
   });
   if (!jogadores.includes(p)) jogadores.push(p);
-  (m.ev || []).forEach(ev => {
-    if (ev.para && ev.para !== p.id) return;
-    if (ev.exceto && ev.exceto === p.id) return;
-    if (ev.f) flutuantes.push({ x: ev.f[0], y: ev.f[1], txt: String(ev.f[2]), cor: corSegura(ev.f[3]), t: 0 });
-    if (Array.isArray(ev.s)) tocarLocal(String(ev.s[0]), ev.s[1] == null ? null : +ev.s[1] || 0);
-    if (ev.fx && ['rosa', 'fumaca', 'explosao'].includes(ev.fx[0])) efeitoLocal(ev.fx[0], +ev.fx[1] || 0, +ev.fx[2] || 0);
-    if (ev.a) avisoLocal(String(ev.a));
-    if (ev.tr && config.tremor) tremor = Math.max(tremor, +ev.tr || 0);
-  });
+  aplicarEventos(m.ev);
   if (antes !== estado && (antes === 'dia' || antes === 'noite')) soltar();
-  const sig = [estado, dia, dinheiro, nivelFerr, nivelBota, estoque, tipoFim, stats.ganho, stats.roubado, stats.recuperado, jogadores.map(q => q.nome + q.cor).join(',')].join('|');
+  const sig = assinaturaAtual();
   if (sig === assinatura) return;
   assinatura = sig;
   if (estado === 'dia' || estado === 'noite') { if (!$('#painel').hidden) esconderPainel(); }
   else renderPainel();
 }
+
+function aplicarEventos(lista) {
+  (lista || []).forEach(ev => {
+    if (ev.para && ev.para !== p.id) return;
+    if (ev.exceto && ev.exceto === p.id) return;
+    if (ev.f) flutuantes.push({ x: ev.f[0], y: ev.f[1], txt: String(ev.f[2]), cor: corSegura(ev.f[3]), t: 0 });
+    if (Array.isArray(ev.s)) tocarLocal(String(ev.s[0]), ev.s[1] == null ? null : +ev.s[1] || 0, ev.s[2] == null ? null : +ev.s[2] || 0);
+    if (ev.fx && ['rosa', 'fumaca', 'explosao'].includes(ev.fx[0])) efeitoLocal(ev.fx[0], +ev.fx[1] || 0, +ev.fx[2] || 0);
+    if (ev.a) avisoLocal(String(ev.a));
+    if (ev.tr && config.tremor) tremor = Math.max(tremor, +ev.tr || 0);
+  });
+}
+const assinaturaAtual = () => [estado, dia, dinheiro, nivelFerr, nivelBota, nivelProp, nivelMochila, JSON.stringify(nivelComb), ajudantes.length, estoque, tipoFim, stats.ganho, stats.roubado, stats.recuperado, jogadores.map(q => q.nome + q.cor).join(',')].join('|');
 
 function suavizar(dt) {
   const k = Math.min(1, dt * 12);
@@ -1755,6 +2050,7 @@ function suavizar(dt) {
   };
   inimigos.forEach(aproxima);
   jogadores.forEach(q => { if (q !== p) aproxima(q); });
+  ajudantes.forEach(aproxima);
 }
 
 function copiarLink() {
@@ -1789,48 +2085,57 @@ function texto(s, x, y, tam, cor, peso = 600) {
   ctx.fillStyle = cor; ctx.fillText(s, x, y);
 }
 
-// O chão é assado em pedaços de 480 px, sob demanda, para o mundo crescer sem limite.
-// Cada pedaço desenha também as manchas dos vizinhos, para não ficar emenda.
+// O chão é assado em faixas de 480 px de altura, sob demanda, para o mundo descer sem limite.
+// Cada faixa desenha também as manchas das vizinhas, para não ficar emenda. As trilhas se repetem a cada fileira de terreno.
 const PEDACO = 480, pedacos = new Map();
+// trilhas horizontais de uma fileira: 144 e 294 px abaixo do topo dela
+const trilhasDaFaixa = (y0, y1) => {
+  const t = [];
+  for (let f = Math.max(0, Math.floor((y0 - AREA.y - 320) / AREA.passoY)); AREA.y + f * AREA.passoY + 144 < y1; f++) {
+    const topo = AREA.y + f * AREA.passoY;
+    t.push(topo + 144, topo + 294);
+  }
+  return t;
+};
 function detalhesChao(g, j) {
-  const rng = mulberry(11 + j * 7919), x0 = j * PEDACO;
+  const rng = mulberry(11 + j * 7919), y0 = j * PEDACO, trilhas = trilhasDaFaixa(y0 - 40, y0 + PEDACO + 40);
   for (let i = 0; i < 120; i++) {
     g.fillStyle = rng() < .5 ? 'rgba(138,168,92,.16)' : 'rgba(36,58,28,.16)';
-    g.beginPath(); g.ellipse(x0 + rng() * PEDACO, rng() * H, 12 + rng() * 44, 8 + rng() * 26, rng() * 3, 0, TAU); g.fill();
+    g.beginPath(); g.ellipse(rng() * W, y0 + rng() * PEDACO, 12 + rng() * 44, 8 + rng() * 26, rng() * 3, 0, TAU); g.fill();
   }
   g.fillStyle = 'rgba(60,42,26,.35)';
   for (let i = 0; i < 90; i++) {
-    const vertical = j === 0 && rng() < .55;
-    const x = vertical ? 170 + rng() * 30 : Math.max(170, x0) + rng() * (x0 + PEDACO - Math.max(170, x0));
-    const y = vertical ? 34 + rng() * (H - 34) : (rng() < .5 ? 204 : 354) + rng() * 22;
+    const vertical = rng() < .35 || !trilhas.length;
+    const x = vertical ? 170 + rng() * 30 : 170 + rng() * (W - 170);
+    const y = vertical ? Math.max(34, y0 + rng() * PEDACO) : trilhas[Math.floor(rng() * trilhas.length)] + rng() * 22;
     g.beginPath(); g.arc(x, y, .8 + rng() * 1.6, 0, TAU); g.fill();
   }
   g.strokeStyle = 'rgba(32,52,26,.55)'; g.lineWidth = 1.3; g.lineCap = 'round';
   for (let i = 0; i < 190; i++) {
-    const x = x0 + rng() * PEDACO, y = 42 + rng() * (H - 42);
-    if (x > 164 && x < 206) continue;
-    if (x > 164 && ((y > 198 && y < 232) || (y > 348 && y < 382))) continue;
+    const x = rng() * W, y = y0 + rng() * PEDACO;
+    if (y < 42 || (x > 164 && x < 206)) continue;
+    if (x > 164 && trilhas.some(t => y > t - 6 && y < t + 28)) continue;
     g.beginPath(); g.moveTo(x - 3, y - 4); g.lineTo(x, y); g.lineTo(x + 3, y - 5); g.moveTo(x, y); g.lineTo(x, y - 6); g.stroke();
   }
 }
 function pedacoChao(k) {
   let c = pedacos.get(k);
   if (c) return c;
-  if (pedacos.size > 8) pedacos.delete(pedacos.keys().next().value);
-  const x0 = k * PEDACO, larg = PEDACO + 2;
-  c = document.createElement('canvas'); c.width = larg * 2; c.height = H * 2;
-  const g = c.getContext('2d'); g.scale(2, 2); g.translate(-x0, 0);
-  g.fillStyle = '#5b7a42'; g.fillRect(x0, 0, larg, H);
+  if (pedacos.size > 5) pedacos.delete(pedacos.keys().next().value);
+  const y0 = k * PEDACO, alt = PEDACO + 2;
+  const res = config.leve ? 1 : 2; // no modo leve, assado no tamanho do jogo: desenhar vira cópia direta
+  c = document.createElement('canvas'); c.width = W * res; c.height = alt * res;
+  const g = c.getContext('2d'); g.scale(res, res); g.translate(0, -y0);
+  g.fillStyle = '#5b7a42'; g.fillRect(0, y0, W, alt);
   g.fillStyle = 'rgba(139,106,70,.78)';
-  if (k === 0) g.fillRect(170, 34, 30, H - 34);
-  const px = Math.max(170, x0);
-  if (px < x0 + larg) { g.fillRect(px, 204, x0 + larg - px, 22); g.fillRect(px, 354, x0 + larg - px, 22); }
+  g.fillRect(170, Math.max(34, y0), 30, y0 + alt - Math.max(34, y0));
+  trilhasDaFaixa(y0, y0 + alt).forEach(t => g.fillRect(170, t, W - 170, 22));
   for (let j = k - 1; j <= k + 1; j++) if (j >= 0) detalhesChao(g, j);
-  g.fillStyle = '#4a4453'; g.fillRect(x0, 0, larg, 34);
-  g.strokeStyle = 'rgba(22,19,28,.55)'; g.lineWidth = 1.5;
-  for (let row = 0; row < 2; row++) for (let x = Math.floor(x0 / 36) * 36 - (row ? 18 : 0); x < x0 + larg; x += 36) g.strokeRect(x + .5, row * 15 + 2.5, 36, 15);
-  g.fillStyle = '#3a3542'; g.fillRect(x0, 32, larg, 4);
   if (k === 0) {
+    g.fillStyle = '#4a4453'; g.fillRect(0, 0, W, 34);
+    g.strokeStyle = 'rgba(22,19,28,.55)'; g.lineWidth = 1.5;
+    for (let row = 0; row < 2; row++) for (let x = row ? -18 : 0; x < W; x += 36) g.strokeRect(x + .5, row * 15 + 2.5, 36, 15);
+    g.fillStyle = '#3a3542'; g.fillRect(0, 32, W, 4);
     g.fillStyle = '#2a2531'; g.fillRect(58, 0, 76, 36);
     g.strokeStyle = '#16131c'; g.lineWidth = 2;
     for (let x = 62; x < 134; x += 8) { g.beginPath(); g.moveTo(x, 2); g.lineTo(x, 36); g.stroke(); }
@@ -1841,11 +2146,11 @@ function pedacoChao(k) {
 const luz = document.createElement('canvas'); luz.width = W; luz.height = H;
 const lg = luz.getContext('2d');
 
-const naTela = (x, m = 80) => x > camDesenho - m && x < camDesenho + W + m;
+const naTela = (y, m = 80) => y > camDY - m && y < camDY + H + m;
 
 function desenharAreas() {
   AREAS.forEach((a, i) => {
-    if (!naTela(a.x + a.w / 2, a.w)) return;
+    if (!naTela(a.y + a.h / 2, a.h)) return;
     if (dono[i]) { rr(a.x, a.y, a.w, a.h, 12); ctx.strokeStyle = 'rgba(22,19,28,.2)'; ctx.lineWidth = 2; ctx.stroke(); return; }
     rr(a.x, a.y, a.w, a.h, 12); ctx.fillStyle = 'rgba(16,13,20,.42)'; ctx.fill();
     ctx.setLineDash([10, 8]); rr(a.x + 4, a.y + 4, a.w - 8, a.h - 8, 10);
@@ -2055,15 +2360,44 @@ function desenharCoveiro(q) {
   circulo(hx + 3 + ox, hy + 2, 1.3); ctx.fill();
   ctx.beginPath(); ctx.ellipse(hx, hy - 4, 12, 4.5, 0, 0, TAU); ctx.fillStyle = '#231e2b'; ctx.fill(); contorno(2);
   rr(hx - 6.5, hy - 14, 13, 10, 3); ctx.fillStyle = '#231e2b'; ctx.fill(); contorno(2);
-  const leva = q.carrega;
+  const leva = q.carrega, itens = q.itens || [];
+  // mochila nas costas com o que não cabe na mão
+  const naMao = leva ? null : itens[0], nasCostas = leva ? itens : itens.slice(1);
+  if (nivelMochila > 0 || nasCostas.length) {
+    const bx = x - Math.cos(q.dir) * 11, by = y - 1 + bob;
+    rr(bx - 8, by - 8, 16, 15, 4); ctx.fillStyle = '#7a5230'; ctx.fill(); contorno(2);
+    nasCostas.forEach((it, i) => { const ix = bx - 5 + i * 5, iy = by - 10; if (it === 'rosa') desenharRosa(ix, iy, .7); else desenharVela(ix, iy, .7); });
+  }
   if (leva && leva.tipo === 'corpo') desenharCorpo(x, y - 28 + bob, leva.corpo.especie, 0, .72);
-  else if (leva && leva.tipo === 'item') {
+  else if (naMao) {
     const ix = x + Math.cos(q.dir) * 16, iy = y + Math.sin(q.dir) * 10 + 2;
-    if (leva.item === 'rosa') desenharRosa(ix, iy, 1.1); else desenharVela(ix, iy, 1.1);
+    if (naMao === 'rosa') desenharRosa(ix, iy, 1.1); else desenharVela(ix, iy, 1.1);
   }
   if (q.golpe > 0) {
     ctx.strokeStyle = `rgba(239,230,210,${Math.min(1, q.golpe / .16 + .2)})`; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.arc(x, y, 36, q.dir - .9, q.dir + .9); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Ajudante: menor que o coveiro, de macacão e boné. Carregador de marrom, zelador de verde
+function desenharAjudante(a) {
+  const x = a.x, y = a.y, bob = a.andando ? Math.sin(tempo * 12 + x * .01) * 1.2 : 0, carregador = a.tipo === 'carregador';
+  ctx.save();
+  if (a.inv > 0 && Math.floor(tempo * 20) % 2) ctx.globalAlpha = .45;
+  sombra(x, y + 10, 12, 4);
+  ctx.beginPath(); ctx.ellipse(x, y + 2 + bob * .3, 10, 9.5, 0, 0, TAU); ctx.fillStyle = carregador ? '#7a5a3a' : '#4f6b3a'; ctx.fill(); contorno(2.2);
+  const hx = x + Math.cos(a.dir) * 1.5, hy = y - 6 + bob;
+  circulo(hx, hy, 6.8); ctx.fillStyle = '#e0bb8f'; ctx.fill(); contorno(2);
+  ctx.fillStyle = COR.tinta;
+  circulo(hx - 2.4 + Math.cos(a.dir) * 2, hy + 1.5, 1.1); ctx.fill();
+  circulo(hx + 2.4 + Math.cos(a.dir) * 2, hy + 1.5, 1.1); ctx.fill();
+  ctx.beginPath(); ctx.arc(hx, hy - 1.5, 7, Math.PI, 0); ctx.closePath(); ctx.fillStyle = carregador ? '#b5563a' : '#d9c46a'; ctx.fill(); contorno(1.6);
+  const leva = a.carrega;
+  if (leva && leva.tipo === 'corpo') desenharCorpo(x, y - 24 + bob, leva.corpo.especie, 0, .6);
+  else if (leva && leva.tipo === 'item') {
+    const ix = x + Math.cos(a.dir) * 12, iy = y + Math.sin(a.dir) * 8 + 2;
+    if (leva.item === 'rosa') desenharRosa(ix, iy, .95); else desenharVela(ix, iy, .95);
   }
   ctx.restore();
 }
@@ -2263,11 +2597,14 @@ function desenharSetas() {
   inimigos.forEach(e => setas.push([e.x, e.y, e.tipo === 'chefe' ? 14 : 10, COR.sangue]));
   if (modo !== 'solo') jogadores.forEach(q => { if (q !== p && !q.caido) setas.push([q.x, q.y, 9, corSegura(q.cor)]); });
   setas.forEach(([x, y, t, cor]) => {
-    const sx = x - camDesenho;
-    if (sx >= -8 && sx <= W + 8) return;
-    const d = sx < 0 ? -1 : 1, ax = sx < 0 ? 16 : W - 16, ay = Math.max(52, Math.min(H - 16, y));
-    ctx.beginPath(); ctx.moveTo(ax + d * t, ay); ctx.lineTo(ax - d * t * .6, ay - t); ctx.lineTo(ax - d * t * .6, ay + t); ctx.closePath();
+    const sx = x - camDX, sy = y - camDY;
+    if (sx >= -8 && sx <= W + 8 && sy >= -8 && sy <= H + 8) return;
+    // aponta da beirada da tela para onde está
+    const ax = Math.max(18, Math.min(W - 18, sx)), ay = Math.max(52, Math.min(H - 18, sy)), ang = Math.atan2(sy - ay, sx - ax);
+    ctx.save(); ctx.translate(ax, ay); ctx.rotate(ang);
+    ctx.beginPath(); ctx.moveTo(t, 0); ctx.lineTo(-t * .6, -t); ctx.lineTo(-t * .6, t); ctx.closePath();
     ctx.fillStyle = cor; ctx.fill(); contorno(2);
+    ctx.restore();
   });
 }
 
@@ -2276,7 +2613,7 @@ function barraChefe() {
   if (!e) return;
   const w = Math.min(420, W - 120), x = (W - w) / 2, y = H - 30;
   // fica transparente quando o chefe ou o coveiro passam por baixo dela
-  ctx.save(); ctx.globalAlpha = e.y > H - 100 || p.y > H - 70 ? .3 : 1;
+  ctx.save(); ctx.globalAlpha = e.y - camDY > H - 100 || p.y - camDY > H - 70 ? .3 : 1;
   rr(x - 4, y - 4, w + 8, 16, 8); ctx.fillStyle = 'rgba(22,19,28,.85)'; ctx.fill();
   rr(x, y, Math.max(0, w * e.vida / e.vidaMax), 8, 4); ctx.fillStyle = COR.sangue; ctx.fill();
   texto('Chefe dos ladrões', W / 2, y - 14, 14, COR.osso, 600);
@@ -2305,15 +2642,15 @@ function desenharEscuro() {
   lg.clearRect(0, 0, W, H);
   lg.fillStyle = `rgba(10,12,34,${escuro})`; lg.fillRect(0, 0, W, H);
   lg.globalCompositeOperation = 'destination-out';
-  lg.setTransform(1, 0, 0, 1, -camDesenho, 0);
+  lg.setTransform(1, 0, 0, 1, -camDX, -camDY);
   jogadores.forEach(q => furo(q.x, q.y, q.caido ? 60 : 120, q.caido ? .5 : .92));
-  lampioes.forEach(l => { if (naTela(l.x, 140)) furo(l.x, l.y - 12, CFG.raioLampiao + 22, 1); });
-  covas.forEach(c => { if (c.fechada && c.enfeite === 'vela' && naTela(c.x)) furo(c.x, c.y + c.h / 2 - 20, 42, .8); });
+  lampioes.forEach(l => { if (naTela(l.y, 140)) furo(l.x, l.y - 12, CFG.raioLampiao + 22, 1); });
+  covas.forEach(c => { if (c.fechada && c.enfeite === 'vela' && naTela(c.y)) furo(c.x, c.y + c.h / 2 - 20, 42, .8); });
   furo(ESTANDES[1].x, ESTANDES[1].y - 8, 46, .8);
   lg.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(luz, 0, 0, W, H);
-  if (escuro > .3) {
-    ctx.save(); ctx.translate(-camDesenho, 0); ctx.globalCompositeOperation = 'lighter';
+  if (escuro > .3 && !config.leve) {
+    ctx.save(); ctx.translate(-camDX, -camDY); ctx.globalCompositeOperation = 'lighter';
     lampioes.forEach(l => {
       const g = ctx.createRadialGradient(l.x, l.y - 34, 0, l.x, l.y - 34, 70);
       g.addColorStop(0, 'rgba(242,181,68,.28)'); g.addColorStop(1, 'rgba(242,181,68,0)');
@@ -2340,18 +2677,18 @@ function desenhar() {
   ctx.setTransform(px, 0, 0, px, 0, 0);
   ctx.clearRect(0, 0, W, H);
   if (tremor > 0) ctx.translate(rnd(-1, 1) * tremor * 14, rnd(-1, 1) * tremor * 14);
-  camDesenho = Math.round(camX * px) / px;
+  camDX = Math.round(camX * px) / px; camDY = Math.round(camY * px) / px;
 
   // Mundo (sob o escuro)
-  ctx.save(); ctx.translate(-camDesenho, 0);
-  for (let k = Math.floor(camDesenho / PEDACO); k * PEDACO < camDesenho + W; k++) ctx.drawImage(pedacoChao(k), k * PEDACO, 0, PEDACO + 2, H);
+  ctx.save(); ctx.translate(-camDX, -camDY);
+  for (let k = Math.floor(camDY / PEDACO); k * PEDACO < camDY + H; k++) ctx.drawImage(pedacoChao(k), 0, k * PEDACO, W, PEDACO + 2);
   desenharAreas();
   if (escuro < .3) lampioes.forEach(l => {
-    if (!naTela(l.x, 120)) return;
+    if (!naTela(l.y, 120)) return;
     ctx.setLineDash([4, 6]); ctx.strokeStyle = 'rgba(242,181,68,.45)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(l.x, l.y, CFG.raioLampiao, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
   });
-  covas.forEach(c => { if (dono[c.area] && naTela(c.x)) desenharCova(c); });
+  covas.forEach(c => { if (dono[c.area] && naTela(c.y)) desenharCova(c); });
   desenharCarroca();
   fila.forEach((c, i) => { if (c) desenharCorpo(SLOTS[i].x, SLOTS[i].y, c.especie); });
   desenharEstandes();
@@ -2359,9 +2696,10 @@ function desenhar() {
   const jogando = estado === 'dia' || estado === 'noite';
   const alvo = jogando && !p.caido ? alvoAtual(p) : null;
   if (alvo) desenharAlvo(alvo);
-  lampioes.forEach(l => { if (naTela(l.x)) desenharLampiao(l); });
+  lampioes.forEach(l => { if (naTela(l.y)) desenharLampiao(l); });
   const ents = inimigos.map(e => ({ y: e.y, f: () => (e.tipo === 'zumbi' ? desenharZumbi(e) : e.tipo === 'chefe' ? desenharChefe(e) : desenharLadrao(e)) }));
   jogadores.forEach(q => ents.push({ y: q.y, f: () => desenharCoveiro(q) }));
+  ajudantes.forEach(a => { if (naTela(a.y)) ents.push({ y: a.y, f: () => desenharAjudante(a) }); });
   ents.sort((a, b) => a.y - b.y).forEach(o => o.f());
   desenharSoltas();
   ctx.restore();
@@ -2369,13 +2707,13 @@ function desenhar() {
   desenharEscuro();
 
   // Por cima do escuro: pedidos, avisos, barras e números
-  ctx.save(); ctx.translate(-camDesenho, 0);
+  ctx.save(); ctx.translate(-camDX, -camDY);
   desenharAvisosChefe();
   fila.forEach((c, i) => { if (c) balao(SLOTS[i].x + 44, SLOTS[i].y - 4, c.pedido); });
   jogadores.forEach(q => { if (!q.caido && q.carrega && q.carrega.tipo === 'corpo') balao(q.x + 30, q.y - 36, q.carrega.corpo.pedido); });
   if (modo !== 'solo') jogadores.forEach(q => { if (q !== p) texto(q.nome, q.x, q.y + 27, 11, COR.osso, 600); });
   covas.forEach(c => {
-    if (!dono[c.area] || !c.corpo || c.levantou || c.enfeite === c.corpo.pedido || !naTela(c.x)) return;
+    if (!dono[c.area] || !c.corpo || c.levantou || c.enfeite === c.corpo.pedido || !naTela(c.y)) return;
     balao(c.x + 22, c.y - c.h / 2 - 2, c.corpo.pedido);
     if (c.levantarEm != null && c.levantarEm < 2.2) texto('!', c.x - 16, c.y - c.h / 2 - 12, 22, COR.sangue, 700);
   });
@@ -2384,6 +2722,14 @@ function desenhar() {
     if (c.corpo && !c.fechada && !c.levantou && c.fechar > 0) barra(c.x, by, c.fechar, COR.osso);
     else if (!c.corpo && c.prof > 0 && c.prof < 2) barra(c.x, by, c.prof / 2, COR.ambar, .5);
   }
+  ajudantes.forEach((a, i) => {
+    if (!naTela(a.y)) return;
+    // nome só de quem não está colado em outro ajudante, pra não embolar
+    if (!ajudantes.some((o, j) => j < i && Math.hypot(o.x - a.x, o.y - a.y) < 44)) texto(a.nome, a.x, a.y + 22, 10, COR.osso, 600);
+    const prog = modo === 'convidado' ? a.prog : a.acao > 0 ? 1 - a.acao / CFG.ajudantes.tempoAcao : 0;
+    if (prog > 0) barra(a.x, a.y - 26, prog, COR.osso);
+    if (a.vida < CFG.ajudantes.vida) barra(a.x, a.y - 34, a.vida / CFG.ajudantes.vida, COR.sangue);
+  });
   inimigos.forEach(e => {
     if (e.tipo === 'ladrao' && e.estado === 'roubando') barra(e.x, e.y + e.r + 12, e.prog, COR.ambar);
     if (e.tipo !== 'chefe' && e.vidaMax && e.vida < e.vidaMax - .01) barra(e.x, e.y - e.r - 20, e.vida / e.vidaMax, COR.sangue);
@@ -2424,19 +2770,28 @@ function atualizarHUD() {
   pinta('hud-dinheiro', 'textContent', `$${dinheiro}`);
   pinta('hud-meta', 'textContent', `de $${meta}`);
   let v = '';
-  for (let i = 0; i < CFG.vidaMax; i++) v += i < p.vida ? '♥' : '<span class="vazio">♥</span>';
+  for (let i = 0; i < vidaMaxima(); i++) v += i < p.vida ? '♥' : '<span class="vazio">♥</span>';
   pinta('hud-vida', 'innerHTML', v);
+  pinta('btn-vel', 'textContent', velJogo === 1 ? '1x' : String(velJogo).replace('.', ',') + 'x');
+  pinta('btn-vel', 'className', 'hud-btn' + (velJogo === 1 ? '' : ' ligado'));
+  pinta('btn-pular', 'hidden', fase !== 'noite');
   pinta('hud-ferramenta', 'textContent', ferramenta().nome);
   pinta('hud-bota', 'hidden', nivelBota === 0);
   pinta('hud-bota', 'textContent', bota().nome);
   pinta('hud-lampioes', 'textContent', `Lampiões ${estoque}`);
   pinta('hud-sala', 'hidden', modo === 'solo');
-  pinta('hud-sala', 'textContent', `Sala ${codigoSala} · ${jogadores.length} ${jogadores.length === 1 ? 'coveiro' : 'coveiros'}`);
+  pinta('hud-sala', 'textContent', `Sala ${codigoSala} · ${jogadores.length} ${jogadores.length === 1 ? 'coveiro' : 'coveiros'}${modo === 'convidado' && pingMs ? ` · ping ${pingMs} ms` : ''}`);
   pinta('dica', 'innerHTML', `<span>${textoDica()}</span>`);
   // antes do jogo, o HUD e a dica somem (mantêm o espaço para a tela não pular ao começar)
   const fora = estado === 'titulo' || estado === 'sala' || estado === 'conexao' ? 'fora' : '';
   pinta('hud', 'className', fora);
   pinta('dica', 'className', fora); // o span evita que o flex engula os espaços em volta do <b>
+}
+
+// "uma rosa", "2 rosas e uma vela"
+function resumoItens(itens) {
+  const n = k => itens.filter(i => i === k).length, parte = (q, um, varios) => (q === 1 ? um : q > 1 ? `${q} ${varios}` : '');
+  return [parte(n('rosa'), 'uma rosa', 'rosas'), parte(n('vela'), 'uma vela', 'velas')].filter(Boolean).join(' e ');
 }
 
 function textoDica() {
@@ -2445,18 +2800,19 @@ function textoDica() {
   const K = toque ? 'Ação' : 'Espaço';
   if (inimigoPerto(p, 40)) return `<b>${K}</b>: bater`;
   const a = alvoAtual(p), leva = p.carrega;
-  const levaTxt = leva && leva.tipo === 'corpo' ? `Levando ${esc(leva.corpo.nome)}`
-    : leva && leva.tipo === 'item' ? `Segurando ${ITEM[leva.item] || ''}` : '';
+  const levando = [leva ? esc(leva.corpo.nome) : '', resumoItens(p.itens)].filter(Boolean).join(', ');
+  const levaTxt = levando ? `Levando ${levando}` : '';
   let acao = '';
   if (a && a.tipo === 'slot') {
     const c = fila[a.i];
-    if (c && !leva) acao = `<b>${K}</b>: pegar ${esc(c.nome)} (${c.especie === 'ogro' ? 'ogro' : 'humano'}, quer ${ITEM[c.pedido] || ''})`;
-    else if (c && leva) acao = 'Mãos ocupadas';
-    else if (!c && leva && leva.tipo === 'corpo') acao = `<b>${K}</b>: devolver pra carroça`;
+    if (c && !leva && p.itens.length <= capacidade() - 1) acao = `<b>${K}</b>: pegar ${esc(c.nome)} (${c.especie === 'ogro' ? 'ogro' : 'humano'}, quer ${ITEM[c.pedido] || ''})`;
+    else if (c) acao = 'Mãos ocupadas';
+    else if (leva) acao = `<b>${K}</b>: devolver pra carroça`;
   } else if (a && a.tipo === 'estande') {
-    if (leva && leva.tipo === 'corpo') acao = 'Mãos ocupadas';
-    else if (leva && leva.item === a.item) acao = `<b>${K}</b>: devolver ${ITEM[a.item]}`;
-    else acao = `<b>${K}</b>: pegar ${ITEM[a.item]}`;
+    if (cabeItem(p)) acao = `<b>${K}</b>: pegar ${ITEM[a.item]}`;
+    else if (p.itens.includes(a.item)) acao = `<b>${K}</b>: devolver ${ITEM[a.item]}`;
+    else if (p.itens.length) acao = `<b>${K}</b>: trocar por ${ITEM[a.item]}`;
+    else acao = 'Mãos ocupadas';
   } else if (a && a.tipo === 'placa') {
     const preco = CFG.precoTerreno(a.area);
     acao = dinheiro >= preco ? `<b>${K}</b>: comprar esse terreno por $${preco}` : `Terreno à venda por $${preco}. Faltam $${preco - dinheiro}.`;
@@ -2470,8 +2826,8 @@ function textoDica() {
       else acao = 'Cova grande pronta';
     } else if (!c.fechada) acao = `Segura <b>${K}</b> pra fechar a cova`;
     else if (c.enfeite !== c.corpo.pedido) {
-      acao = leva && leva.tipo === 'item' && leva.item === c.corpo.pedido
-        ? `<b>${K}</b>: colocar ${ITEM[leva.item]}`
+      acao = p.itens.includes(c.corpo.pedido)
+        ? `<b>${K}</b>: colocar ${ITEM[c.corpo.pedido]}`
         : c.enfeite === 'apagada' ? `A vela de ${esc(c.corpo.nome)} apagou. Tem vela nova lá embaixo, à esquerda.`
         : `${esc(c.corpo.nome)} quer ${ITEM[c.corpo.pedido] || ''}. Tem lá embaixo, à esquerda.`;
     } else acao = `${esc(c.corpo.nome)} descansa em paz`;
@@ -2486,10 +2842,26 @@ function redimensionar() {
   if (!r.width || !r.height) return;
   escala = Math.min(r.width / W, r.height / H);
   dpr = Math.min(window.devicePixelRatio || 1, 2);
+  // modo leve: no máximo 1 pixel do canvas por pixel do jogo (960x560); o navegador estica o resto
+  if (config.leve) dpr = Math.min(dpr, 1 / escala);
   tela.style.width = Math.floor(W * escala) + 'px';
   tela.style.height = Math.floor(H * escala) + 'px';
-  tela.width = Math.floor(W * escala * dpr);
-  tela.height = Math.floor(H * escala * dpr);
+  tela.width = Math.round(W * escala * dpr);
+  tela.height = Math.round(H * escala * dpr);
+}
+function aplicarLeve() { pedacos.clear(); redimensionar(); }
+
+// Se a partida passar uns segundos abaixo de ~35 quadros por segundo, o modo leve liga sozinho (uma vez por computador)
+let lentoT = 0, lentoN = 0;
+function vigiarLentidao(real) {
+  if (config.leve || !config.leveAuto || (estado !== 'dia' && estado !== 'noite') || document.hidden || real > .25) { lentoT = 0; lentoN = 0; return; }
+  lentoT += real; lentoN++;
+  if (lentoT < 4) return;
+  const media = lentoT / lentoN;
+  lentoT = 0; lentoN = 0;
+  if (media < 1 / 35) return;
+  config.leve = true; config.leveAuto = false; salvarConfig(); aplicarLeve();
+  avisoLocal('Tava pesado aqui, então liguei o modo leve. Dá pra desligar nas Configurações.');
 }
 new ResizeObserver(redimensionar).observe(palco);
 addEventListener('resize', redimensionar);
@@ -2529,9 +2901,11 @@ telaInicio = online && salaUrl ? 'multi' : 'inicio'; // quem chega por um link d
 renderPainel();
 let ultimo = performance.now();
 function quadro(t) {
-  const dt = Math.min(.05, Math.max(0, (t - ultimo) / 1000));
+  const real = Math.max(0, (t - ultimo) / 1000);
   ultimo = t;
-  atualizar(dt);
+  vigiarLentidao(real);
+  // passos de no máximo 0,05 s; abaixo de 20 quadros por segundo o jogo dá mais de um passo, até 0,25 s por quadro
+  for (let resto = Math.min(.25, real) * velJogo; resto > 1e-6; resto -= .05) atualizar(Math.min(.05, resto));
   enviarMundo();
   desenhar();
   atualizarHUD();
