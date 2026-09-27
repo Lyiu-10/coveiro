@@ -168,15 +168,15 @@ const CFG = {
   maxJogadores: 4,
   ferramentas: [
     { nome: 'Mãos', preco: 0, cavar: 1, dano: 1, desc: '' },
-    { nome: 'Pá', preco: 35, cavar: 2, dano: 2, desc: 'Cava e fecha 2× mais rápido que as mãos. Bate com força 2.' },
-    { nome: 'Cavadeira', preco: 90, cavar: 3, dano: 3, desc: 'Cava e fecha 3× mais rápido que as mãos. Bate com força 3.' },
-    { nome: 'Escavadeira', preco: 180, cavar: 5, dano: 5, desc: 'Cava e fecha 5× mais rápido que as mãos. Ogro nenhum segura.' },
+    { nome: 'Pá', preco: 35, cavar: 2, dano: 2, desc: 'Cava e fecha no dobro da velocidade. E bate mais forte.' },
+    { nome: 'Cavadeira', preco: 90, cavar: 3, dano: 3, desc: 'Três vezes mais rápida que cavar na mão. Bate mais forte que a pá.' },
+    { nome: 'Escavadeira', preco: 180, cavar: 5, dano: 5, desc: 'Cinco vezes mais rápida. Ogro nenhum aguenta.' },
   ],
   botas: [
     { nome: 'Botina', preco: 0, vel: 1, desc: '' },
     { nome: 'Bota de couro', preco: 25, vel: 1.2, desc: 'Anda 20% mais rápido.' },
-    { nome: 'Bota de cano alto', preco: 60, vel: 1.4, desc: 'Anda 40% mais rápido que de botina.' },
-    { nome: 'Bota de sete léguas', preco: 120, vel: 1.65, desc: 'Anda 65% mais rápido que de botina. Atravessa o cemitério num pulo.' },
+    { nome: 'Bota de cano alto', preco: 60, vel: 1.4, desc: 'Anda 40% mais rápido.' },
+    { nome: 'Bota de sete léguas', preco: 120, vel: 1.65, desc: 'Anda 65% mais rápido. Atravessa o cemitério num pulo.' },
   ],
   // Bichos da noite: poucos no começo, muitos no fim, e a cada dia com mais defesa e mais cura
   ladroes: d => Math.max(1, Math.round(0.25 * d * d + 0.75)), // 1, 2, 3, 5, 7
@@ -270,7 +270,7 @@ function salvarConfig() { try { localStorage.setItem('coveiro.config', JSON.stri
 let config = lerConfig();
 
 // ===== Som: um volume geral e três canais (música, ambiente, efeitos) =====
-// Ainda não há música nem efeito no jogo. Quando entrar, é só ligar o som no canal certo: som.canais.musica, .ambiente ou .efeitos
+// Tudo é sintetizado aqui mesmo. Quando houver arquivos de áudio, é só trocar a receita em SONS ou tocar o arquivo no canal certo
 const CANAIS = ['musica', 'ambiente', 'efeitos'];
 const som = { ctx: null, geral: null, canais: {} };
 function iniciarSom() {
@@ -279,7 +279,11 @@ function iniciarSom() {
   if (!AC) return;
   try {
     som.ctx = new AC();
-    som.geral = som.ctx.createGain(); som.geral.connect(som.ctx.destination);
+    // o limitador segura vários sons juntos sem distorcer
+    const lim = som.ctx.createDynamicsCompressor();
+    lim.threshold.value = -6; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = .003; lim.release.value = .25;
+    lim.connect(som.ctx.destination);
+    som.geral = som.ctx.createGain(); som.geral.connect(lim);
     CANAIS.forEach(k => { som.canais[k] = som.ctx.createGain(); som.canais[k].connect(som.geral); });
     aplicarVolumes();
   } catch (e) { som.ctx = null; }
@@ -290,32 +294,170 @@ function aplicarVolumes() {
   som.geral.gain.value = curva(config.geral);
   CANAIS.forEach(k => { som.canais[k].gain.value = curva(config[k]); });
 }
-// Som de teste que toca ao soltar cada barra das configurações
+// O navegador só libera o som depois de um clique ou tecla; com a aba escondida, o som pausa
+addEventListener('pointerdown', iniciarSom, { once: true });
+addEventListener('keydown', iniciarSom, { once: true });
+document.addEventListener('visibilitychange', () => {
+  if (!som.ctx) return;
+  if (document.hidden) som.ctx.suspend().catch(() => {}); else som.ctx.resume().catch(() => {});
+});
+
+// --- Peças de síntese ---
+const midi = n => 440 * 2 ** ((n - 69) / 12);
+// Um tom com ataque curto e queda: tipo, frequência inicial e final, e um filtro opcional para abafar
+function tom(tipo, f0, t, dur, pico, destino, f1, corte) {
+  const c = som.ctx, o = c.createOscillator(), g = c.createGain();
+  o.type = tipo; o.frequency.setValueAtTime(f0, t);
+  if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(pico, t + .006);
+  g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  let saida = g;
+  if (corte) { const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = corte; g.connect(f); saida = f; }
+  o.connect(g); saida.connect(destino); o.start(t); o.stop(t + dur + .03);
+}
+let bufRuido = null;
+function ruido() {
+  if (bufRuido) return bufRuido;
+  const c = som.ctx;
+  bufRuido = c.createBuffer(1, c.sampleRate, c.sampleRate);
+  const d = bufRuido.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return bufRuido;
+}
+// Um chiado de ruído filtrado (pá na terra, golpe, explosão, vento)
+function chiado(t, dur, pico, destino, filtro, f0, f1, q = 1) {
+  const c = som.ctx, n = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+  n.buffer = ruido(); f.type = filtro; f.Q.value = q;
+  f.frequency.setValueAtTime(f0, t);
+  if (f1) f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(pico, t + .01);
+  g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  n.connect(f); f.connect(g); g.connect(destino);
+  n.start(t, Math.random() * .4); n.stop(t + dur + .03);
+}
+
+// --- Efeitos: cada receita recebe o instante e o destino ---
+const SONS = {
+  clique: (t, d) => tom('triangle', 900, t, .05, .14, d, 620),
+  pop: (t, d) => tom('sine', 480, t, .1, .22, d, 900),
+  cavar: (t, d) => chiado(t, .16, .3, d, 'bandpass', 1500, 650, .9),
+  baque: (t, d) => { tom('sine', 150, t, .2, .45, d, 55); chiado(t, .1, .18, d, 'lowpass', 700); },
+  moeda: (t, d) => { tom('square', 1318, t, .08, .14, d, 0, 5000); tom('square', 1760, t + .07, .25, .14, d, 0, 5000); },
+  compra: (t, d) => { chiado(t, .05, .12, d, 'highpass', 3000); SONS.moeda(t + .04, d); },
+  golpe: (t, d) => { chiado(t, .1, .45, d, 'lowpass', 1800, 300); tom('sine', 190, t, .13, .35, d, 70); },
+  dor: (t, d) => tom('sawtooth', 300, t, .25, .24, d, 140, 1200),
+  ladrao: (t, d) => { tom('sine', 1150, t, .12, .22, d, 1650); tom('sine', 1000, t + .16, .18, .22, d, 700); },
+  roubo: (t, d) => { tom('triangle', 880, t, .12, .15, d, 440); tom('triangle', 620, t + .13, .2, .15, d, 300); },
+  gemido: (t, d) => tom('sawtooth', 120, t, 1, .14, d, 78, 500),
+  chefe: (t, d) => { tom('sawtooth', 98, t, 1.2, .28, d, 62, 700); tom('sawtooth', 147, t + .05, 1.1, .18, d, 92, 700); },
+  alerta: (t, d) => tom('square', 440, t, .28, .16, d, 900, 2500),
+  arremesso: (t, d) => chiado(t, .3, .6, d, 'bandpass', 500, 2600, 2),
+  explosao: (t, d) => { chiado(t, .7, .65, d, 'lowpass', 2200, 110); tom('sine', 95, t, .55, .55, d, 32); },
+  sino: (t, d) => [1, 2.76, 5.4].forEach((k, i) => tom('sine', 196 * k, t, 2.4 - i * .6, [.3, .12, .06][i], d)),
+  manha: (t, d) => [523, 659, 784].forEach((f, i) => tom('triangle', f, t + i * .1, .55, .13, d)),
+  vitoria: (t, d) => [523, 659, 784, 1047].forEach((f, i) => tom('triangle', f, t + i * .13, i === 3 ? 1.1 : .5, .16, d)),
+  derrota: (t, d) => [392, 370, 349, 330].forEach((f, i) => tom('triangle', f, t + i * .38, i === 3 ? 1.2 : .42, .16, d, i === 3 ? 290 : 0)),
+  grilo: (t, d) => { for (let i = 0; i < 3; i++) tom('sine', 4400, t + i * .055, .035, .06, d); },
+  passaro: (t, d) => { tom('sine', 2300, t, .1, .07, d, 3100); tom('sine', 2600, t + .14, .08, .06, d, 3300); },
+};
+const ultimoSom = {};
+// Toca um efeito aqui; com x, fica mais baixo quanto mais longe da câmera
+function tocarLocal(nome, x) {
+  if (!som.ctx || som.ctx.state !== 'running' || !Object.prototype.hasOwnProperty.call(SONS, nome)) return;
+  const agora = som.ctx.currentTime;
+  if (agora - (ultimoSom[nome] || -1) < .045) return; // o mesmo som várias vezes no mesmo instante vira um só
+  ultimoSom[nome] = agora;
+  let vol = 1;
+  if (x != null) { vol = Math.min(1, 1.35 - Math.abs(x - (camX + W / 2)) / 700); if (vol <= .05) return; }
+  const g = som.ctx.createGain(); g.gain.value = vol * 1.6; g.connect(som.canais.efeitos);
+  try { SONS[nome](agora + .01, g); } catch (e) { /* receita quebrada não derruba o jogo */ }
+}
+// Toca e, no online, manda o anfitrião tocar também nos convidados
+function tocar(nome, x) {
+  tocarLocal(nome, x);
+  if (modo === 'anfitriao') eventos.push({ s: [nome, x == null ? null : Math.round(x)] });
+}
+
+// --- Música: valsinha de caixinha em lá menor. À noite desce uma oitava e fica mais lenta ---
+const VALSA = [ // [acorde, baixo, melodia em [nota, tempos]] por compasso de 3 tempos
+  [[57, 60, 64], 45, [[69, 1], [72, 1], [76, 1]]],
+  [[57, 60, 64], 45, [[75, 1], [76, 2]]],
+  [[57, 62, 65], 50, [[77, 1], [76, 1], [74, 1]]],
+  [[56, 59, 64], 40, [[71, 2], [68, 1]]],
+  [[57, 60, 64], 45, [[69, 1], [72, 1], [76, 1]]],
+  [[57, 60, 65], 41, [[77, 1], [76, 1], [72, 1]]],
+  [[56, 59, 64], 40, [[71, 1], [74, 1], [68, 1]]],
+  [[57, 60, 64], 45, [[69, 3]]],
+  [[57, 60, 65], 41, [[77, 1], [76, 1], [77, 1]]],
+  [[55, 60, 64], 48, [[79, 2], [76, 1]]],
+  [[57, 62, 65], 50, [[74, 1], [77, 1], [74, 1]]],
+  [[56, 59, 64], 40, [[76, 2], [71, 1]]],
+  [[57, 60, 64], 45, [[72, 1], [71, 1], [69, 1]]],
+  [[57, 62, 65], 50, [[74, 1], [72, 1], [71, 1]]],
+  [[56, 59, 62], 40, [[68, 1], [71, 1], [74, 1]]],
+  [[57, 60, 64], 45, [[69, 2], [0, 1]]],
+];
+const musica = { proxima: 0, compasso: 0, noite: false };
+function tocarCompasso(i, t) {
+  const [acorde, baixo, mel] = VALSA[i], noite = musica.noite, tempo = 60 / (noite ? 104 : 132), d = som.canais.musica;
+  tom('triangle', midi(baixo), t, tempo * .9, .28, d);
+  if (noite) acorde.forEach(n => tom('triangle', midi(n), t + tempo, tempo * 1.9, .045, d, 0, 900));
+  else [1, 2].forEach(k => acorde.forEach(n => tom('square', midi(n), t + k * tempo, tempo * .35, .03, d, 0, 1400)));
+  let s = 0;
+  mel.forEach(([n, dur]) => {
+    if (n) tom(noite ? 'sine' : 'triangle', midi(noite ? n - 12 : n), t + s * tempo, dur * tempo * .95, noite ? .22 : .18, d);
+    s += dur;
+  });
+  return 3 * tempo;
+}
+function agendarMusica() {
+  if (!som.ctx || som.ctx.state !== 'running') return;
+  const agora = som.ctx.currentTime;
+  if (musica.proxima < agora) musica.proxima = agora + .05; // voltou de uma pausa: recomeça sem atropelar
+  while (musica.proxima < agora + .3) {
+    musica.proxima += tocarCompasso(musica.compasso, musica.proxima);
+    musica.compasso = (musica.compasso + 1) % VALSA.length;
+  }
+}
+setInterval(agendarMusica, 100);
+
+// --- Ambiente e o que muda com a fase: grilo à noite, passarinho de dia, vento na ventania, pá cavando ---
+let ventoSom = null, faseSom = '', tCavar = 0;
+function atualizarSom(dt) {
+  if (!som.ctx || som.ctx.state !== 'running') return;
+  const fase = estado === 'pausa' ? estadoPausado : estado;
+  musica.noite = fase === 'noite';
+  if (fase !== faseSom) {
+    if (fase === 'loja') tocarLocal('sino');
+    else if (fase === 'amanhecer') tocarLocal('manha');
+    else if (fase === 'fim') tocarLocal(tipoFim === 'vitoria' ? 'vitoria' : 'derrota');
+    faseSom = fase;
+  }
+  if (estado === 'pausa') return;
+  const a = som.canais.ambiente, t = som.ctx.currentTime;
+  if (fase === 'noite' && Math.random() < dt * 1.6) SONS.grilo(t + .01, a);
+  if (fase === 'dia' && Math.random() < dt * .22) SONS.passaro(t + .01, a);
+  if (!ventoSom) {
+    const n = som.ctx.createBufferSource(), f = som.ctx.createBiquadFilter(), g = som.ctx.createGain();
+    n.buffer = ruido(); n.loop = true; f.type = 'bandpass'; f.frequency.value = 420; f.Q.value = .7; g.gain.value = 0;
+    n.connect(f); f.connect(g); g.connect(a); n.start();
+    ventoSom = { g, f };
+  }
+  ventoSom.g.gain.setTargetAtTime(ventoVis * .45, t, .2);
+  ventoSom.f.frequency.setTargetAtTime(380 + ventoVis * 260 + Math.sin(tempo * 1.7) * 60, t, .3);
+  if ((fase === 'dia' || fase === 'noite') && p.trabalhando && !p.caido) {
+    tCavar -= dt;
+    if (tCavar <= 0) { tocarLocal('cavar', p.x); tCavar = .32; }
+  } else tCavar = 0;
+}
+
+// Som de exemplo ao soltar cada barra das configurações (a música já está tocando, então ela não precisa)
 function somDeTeste(canal) {
   iniciarSom();
   if (!som.ctx) return;
-  const c = som.ctx, t0 = c.currentTime + .02, destino = som.canais[canal] || som.canais.efeitos;
-  const nota = (freq, ini, dur, tipo, pico) => {
-    const o = c.createOscillator(), g = c.createGain();
-    o.type = tipo; o.frequency.value = freq;
-    g.gain.setValueAtTime(0, t0 + ini); g.gain.linearRampToValueAtTime(pico, t0 + ini + .02);
-    g.gain.exponentialRampToValueAtTime(.001, t0 + ini + dur);
-    o.connect(g); g.connect(destino); o.start(t0 + ini); o.stop(t0 + ini + dur + .05);
-  };
-  if (canal === 'musica') [392, 494, 587].forEach((f, i) => nota(f, i * .14, .5, 'triangle', .25));
-  else if (canal === 'ambiente') {
-    // um sopro de vento: ruído filtrado
-    const b = c.createBuffer(1, Math.floor(c.sampleRate * .9), c.sampleRate), d = b.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    const n = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
-    f.type = 'bandpass'; f.frequency.value = 500; f.Q.value = .8;
-    g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(.4, t0 + .35); g.gain.linearRampToValueAtTime(0, t0 + .9);
-    n.buffer = b; n.connect(f); f.connect(g); g.connect(destino); n.start(t0);
-  } else { nota(660, 0, .14, 'square', .12); nota(440, .09, .16, 'square', .1); }
+  if (canal === 'ambiente') { SONS.grilo(som.ctx.currentTime + .02, som.canais.ambiente); SONS.passaro(som.ctx.currentTime + .3, som.canais.ambiente); }
+  else if (canal !== 'musica') tocarLocal('moeda');
 }
-// O navegador só libera o som depois de um clique ou tecla
-addEventListener('pointerdown', iniciarSom, { once: true });
-addEventListener('keydown', iniciarSom, { once: true });
 
 const tela = $('#tela'), ctx = tela.getContext('2d'), palco = $('#palco');
 let escala = 1, dpr = 1;
@@ -396,7 +538,7 @@ function comecarDia() {
   if (dia > 1) chegar();
   sortearEvento();
   renderPainel();
-  aviso(dia === 1 ? 'Pegue o primeiro corpo na carroça, à esquerda.' : `Dia ${dia}. A carroça chegou.`);
+  aviso(dia === 1 ? 'O primeiro defunto tá na carroça, à esquerda.' : `Dia ${dia}. Chegou defunto na carroça.`);
 }
 
 function anoitecer() {
@@ -437,11 +579,11 @@ function despausar() { estado = estadoPausado; subtela = null; renderPainel(); }
 function comprar(item) {
   if (item === 'ferramenta') {
     const f = CFG.ferramentas[nivelFerr + 1];
-    if (f && dinheiro >= f.preco) { dinheiro -= f.preco; nivelFerr++; }
+    if (f && dinheiro >= f.preco) { dinheiro -= f.preco; nivelFerr++; tocar('compra'); }
   } else if (item === 'bota') {
     const b = CFG.botas[nivelBota + 1];
-    if (b && dinheiro >= b.preco) { dinheiro -= b.preco; nivelBota++; }
-  } else if (item === 'lampiao' && dinheiro >= CFG.precoLampiao) { dinheiro -= CFG.precoLampiao; estoque++; }
+    if (b && dinheiro >= b.preco) { dinheiro -= b.preco; nivelBota++; tocar('compra'); }
+  } else if (item === 'lampiao' && dinheiro >= CFG.precoLampiao) { dinheiro -= CFG.precoLampiao; estoque++; tocar('compra'); }
   if (estado === 'loja') mostrarLoja();
 }
 
@@ -478,28 +620,28 @@ const esperando = acao => `<p class="espera">Esperando ${esc(anfitriaoNome())} $
 
 function mostrarInicio() {
   mostrarPainel(`<div class="cartao inicio">
-    <div><p class="sobre">Um cemitério, cinco dias, uma dívida</p><h1>Coveiro</h1></div>
+    <div><p class="sobre">O tio morreu e sobrou pra você</p><h1>Coveiro</h1></div>
     <nav class="menu" aria-label="Menu">
-      <button type="button" data-acao="tela-solo" data-principal><b>Solo</b><small>Você, a pá e a dívida</small></button>
-      <button type="button" data-acao="tela-multi"><b>Multiplayer</b><small>Até ${CFG.maxJogadores} coveiros no mesmo cemitério</small></button>
+      <button type="button" data-acao="tela-solo" data-principal><b>Solo</b><small>Só você e a pá</small></button>
+      <button type="button" data-acao="tela-multi"><b>Multiplayer</b><small>Você e mais ${CFG.maxJogadores - 1} amigos</small></button>
       <button type="button" data-acao="config"><b>Configurações</b><small>Som e tela</small></button>
     </nav>
   </div>`);
 }
 
 function comoJogar() {
-  const deitado = toque && matchMedia('(orientation: portrait)').matches ? ' Fica melhor com o celular deitado.' : '';
+  const deitado = toque && matchMedia('(orientation: portrait)').matches ? ' Vira o celular de lado que fica melhor.' : '';
   const controles = toque
-    ? `Arraste do lado esquerdo da tela para andar. Segure <b>Ação</b> para cavar e fechar.${deitado}`
-    : '<kbd>WASD</kbd> ou setas para andar · <kbd>Espaço</kbd> ação (segure para cavar e fechar) · <kbd>Q</kbd> lampião · <kbd>P</kbd> pausa';
+    ? `Arrasta o dedo no lado esquerdo pra andar. Segura <b>Ação</b> pra cavar e fechar.${deitado}`
+    : '<kbd>WASD</kbd> ou setas pra andar · <kbd>Espaço</kbd> faz tudo (segura pra cavar e fechar) · <kbd>Q</kbd> põe lampião · <kbd>P</kbd> pausa';
   return `<div class="blocos">
       <div><h3>De dia · 2 minutos</h3><ol>
-        <li>Pegue um corpo na carroça.</li>
-        <li>Cave a cova. Ogro paga mais, mas pede cova grande.</li>
-        <li>Coloque o corpo e feche a cova.</li>
-        <li>Atenda o pedido do morto: rosa vermelha ou vela.</li>
+        <li>Pega um defunto na carroça.</li>
+        <li>Abre a cova. Ogro paga mais, só que pede cova grande.</li>
+        <li>Bota ele lá dentro e fecha.</li>
+        <li>Leva o que o morto pediu, rosa vermelha ou vela.</li>
       </ol></div>
-      <div><h3>De noite</h3><p>Ladrões pulam o muro atrás das covas. Morto mal enterrado levanta e vem atrás de você. Bata com o que tiver na mão: ladrão derrubado solta moedas. A noite acaba quando o cemitério ficar limpo. Se a vida acabar, acabou.</p></div>
+      <div><h3>De noite</h3><p>Ladrão pula o muro pra saquear as covas, e morto mal enterrado levanta atrás de você. Bate neles com o que tiver na mão. Ladrão que cai deixa moeda no chão. A noite acaba quando não sobrar ninguém de pé, e se a sua vida zerar, já era.</p></div>
     </div>
     <p class="controles">${controles}</p>`;
 }
@@ -507,7 +649,7 @@ function comoJogar() {
 function mostrarSolo() {
   mostrarPainel(`<div class="cartao">
     <div><p class="sobre">Solo</p><h2>Como jogar</h2></div>
-    <p>Seu tio morreu e deixou para você um cemitério e uma dívida de <b>$${CFG.meta}</b> com a prefeitura. Você tem ${CFG.dias} dias para pagar.</p>
+    <p>Seu tio morreu e te deixou um cemitério. E uma dívida de <b>$${CFG.meta}</b> com a prefeitura. Você tem ${CFG.dias} dias pra pagar.</p>
     ${comoJogar()}
     <div class="botoes">
       <button class="btn" type="button" data-acao="jogar-solo" data-principal>Começar</button>
@@ -521,7 +663,7 @@ function mostrarMulti() {
   if (!online) {
     mostrarPainel(`<div class="cartao">
       <div><p class="sobre">Multiplayer</p><h2>Jogar junto</h2></div>
-      <p>Aqui dentro do Claude a conexão entre navegadores é bloqueada. Para jogar com amigos, abra o jogo neste endereço: ${link}</p>
+      <p>Aqui dentro do Claude o online não funciona. Pra jogar com a galera, abre por este link: ${link}</p>
       <div class="botoes"><button class="btn" type="button" data-acao="tela-inicio" data-principal>Voltar</button></div>
     </div>`);
     return;
@@ -529,9 +671,9 @@ function mostrarMulti() {
   const convite = salaUrl;
   mostrarPainel(`<div class="cartao">
     <div><p class="sobre">Multiplayer</p><h2>Jogar junto</h2></div>
-    <p>Até ${CFG.maxJogadores} coveiros no mesmo cemitério. Quem cria a sala manda o link, e os outros entram por ele ou pelo código de 4 letras.</p>
+    <p>Cabem ${CFG.maxJogadores} coveiros no cemitério. Quem cria a sala manda o link pro resto, ou passa o código de 4 letras.</p>
     <div class="linha-nome"><label for="nome">Seu nome</label><input id="nome" type="text" maxlength="14" value="${esc(p.nome)}" autocomplete="off" spellcheck="false"></div>
-    ${convite ? `<div class="convite">Você foi chamado para a sala <b>${esc(salaUrl)}</b>.</div>
+    ${convite ? `<div class="convite">Te chamaram pra sala <b>${esc(salaUrl)}</b>.</div>
       <div class="botoes"><button class="btn" type="button" data-acao="entrar-link" data-principal>Entrar na sala ${esc(salaUrl)}</button></div>` : ''}
     <div class="blocos">
       <div><h3>Criar uma sala</h3><div class="botoes"><button class="btn${convite ? ' sec' : ''}" type="button" data-acao="criar"${convite ? '' : ' data-principal'}>Criar sala</button></div></div>
@@ -554,12 +696,12 @@ function mostrarConfig() {
       ${barra('musica', 'Música')}
       ${barra('ambiente', 'Ambiente')}
       ${barra('efeitos', 'Efeitos')}
-      <label class="ajuste-marca"><input type="checkbox" id="cfg-tremor"${config.tremor ? ' checked' : ''}> Tremer a tela nos impactos</label>
+      <label class="ajuste-marca"><input type="checkbox" id="cfg-tremor"${config.tremor ? ' checked' : ''}> Tremer a tela com pancada e explosão</label>
     </div>
-    <p class="nota">O jogo ainda não tem música nem efeitos. Ao soltar cada barra, toca um som de teste naquele volume. As configurações ficam guardadas só neste aparelho.</p>
+    <p class="nota">A música já tá tocando, é só mexer e ouvir. Nas barras de ambiente e efeitos, solta pra escutar um exemplo. Isso fica salvo só neste computador.</p>
     <div class="botoes">
       <button class="btn" type="button" data-acao="fechar-config" data-principal>Voltar</button>
-      <button class="btn sec" type="button" data-acao="config-padrao">Restaurar o padrão</button>
+      <button class="btn sec" type="button" data-acao="config-padrao">Voltar pro padrão</button>
     </div>
   </div>`);
 }
@@ -570,12 +712,12 @@ function mostrarSala() {
   const anf = modo === 'anfitriao', n = jogadores.length;
   const lista = jogadores.map(q => `<li><i style="background:${corSegura(q.cor)}"></i>${esc(q.nome)}${q === p ? ' (você)' : ''}</li>`).join('');
   mostrarPainel(`<div class="cartao">
-    <div><p class="sobre">Partida online · sala ${esc(codigoSala)}</p><h2>${anf ? 'Chame o pessoal' : 'Você entrou'}</h2></div>
-    ${anf ? `<p>Mande este link. Cabem até ${CFG.maxJogadores} coveiros, e a partida começa quando você mandar.</p>
+    <div><p class="sobre">Partida online · sala ${esc(codigoSala)}</p><h2>${anf ? 'Chama a galera' : 'Você tá dentro'}</h2></div>
+    ${anf ? `<p>Manda esse link pra galera. Cabem ${CFG.maxJogadores} coveiros, e o jogo só começa quando você quiser.</p>
       <div class="link-sala" id="link-sala">${esc(linkSala())}</div>
       <div class="botoes"><button class="btn sec" type="button" data-acao="copiar">Copiar link</button></div>` : ''}
     <div><h3>No cemitério · ${n} de ${CFG.maxJogadores}</h3><ul class="jogadores">${lista}</ul></div>
-    <p class="nota">${n > 1 ? `Com ${n} coveiros, a dívida sobe para $${metaPara(n)}, e chegam mais corpos e mais ladrões.` : `Sozinho, a dívida é de $${metaPara(1)}. Cada coveiro a mais aumenta a dívida, os corpos e os ladrões.`}</p>
+    <p class="nota">${n > 1 ? `Com ${n} coveiros a dívida sobe pra $${metaPara(n)}. Vem mais defunto e mais ladrão também.` : `Por enquanto é só você, com dívida de $${metaPara(1)}. Cada um que entra aumenta a dívida e traz mais defunto e mais ladrão.`}</p>
     ${anf ? '' : esperando('começar')}
     <div class="botoes">
       ${anf ? '<button class="btn" type="button" data-acao="comecar" data-principal>Começar</button>' : ''}
@@ -591,16 +733,16 @@ function mostrarLoja() {
   const btn = (acao, preco) => `<button type="button" data-acao="${acao}"${dinheiro >= preco ? '' : ' disabled'}>$${preco}</button>`;
   mostrarPainel(`<div class="cartao">
     <div><p class="sobre">Anoitecer do dia ${dia} de ${CFG.dias}</p><h2>Loja do coveiro</h2></div>
-    <div class="saldo"><b>$${dinheiro}</b><span>no bolso · a dívida de $${meta} vence na alvorada do dia ${CFG.dias + 1}</span></div>
-    <div class="alerta">${n === 1 ? 'Um ladrão vem' : n + ' ladrões vêm'} esta noite${ultimaNoite() ? ', e o chefe deles vem junto. Cada golpe dele leva dinheiro do seu bolso' : ''}. A noite acaba quando o cemitério ficar limpo.</div>
+    <div class="saldo"><b>$${dinheiro}</b><span>no bolso · a prefeitura cobra $${meta} no amanhecer do dia ${CFG.dias + 1}</span></div>
+    <div class="alerta">Hoje à noite ${n === 1 ? 'vem um ladrão' : 'vêm ' + n + ' ladrões'}.${ultimaNoite() ? ' O chefe deles vem junto, e cada pancada dele tira grana do seu bolso.' : ''}</div>
     <ul class="loja">
       ${f
         ? `<li><div><b>${f.nome}</b><small>${f.desc}</small></div>${btn('ferramenta', f.preco)}</li>`
-        : `<li><div><b>${ferramenta().nome}</b><small>Vocês já têm a melhor ferramenta.</small></div></li>`}
+        : `<li><div><b>${ferramenta().nome}</b><small>Não tem ferramenta melhor que essa.</small></div></li>`}
       ${b
         ? `<li><div><b>${b.nome}</b><small>${b.desc}</small></div>${btn('bota', b.preco)}</li>`
-        : `<li><div><b>${bota().nome}</b><small>Vocês já têm a bota mais rápida.</small></div></li>`}
-      <li><div><b>Lampião</b><small>Ladrão não mexe em cova iluminada. Coloque com ${toque ? 'o botão Lampião' : '<kbd>Q</kbd>'}. ${modo === 'solo' ? 'Você tem' : 'O time tem'} ${estoque}.</small></div>${btn('lampiao', CFG.precoLampiao)}</li>
+        : `<li><div><b>${bota().nome}</b><small>Não tem bota mais rápida que essa.</small></div></li>`}
+      <li><div><b>Lampião</b><small>Ladrão não mexe em cova iluminada. Põe no chão com ${toque ? 'o botão Lampião' : '<kbd>Q</kbd>'}. ${modo === 'solo' ? 'Você tem' : 'O time tem'} ${estoque}.</small></div>${btn('lampiao', CFG.precoLampiao)}</li>
     </ul>
     ${modo !== 'convidado' ? '<button class="btn" type="button" data-acao="noite" data-principal>Encarar a noite</button>' : esperando('encarar a noite')}
   </div>`);
@@ -625,9 +767,9 @@ function mostrarFim() {
   const falta = Math.max(0, meta - dinheiro);
   const time = jogadores.length > 1;
   const t = {
-    vitoria: ['Alvorada do dia ' + (CFG.dias + 1), 'Dívida paga', `${time ? 'Vocês fecharam' : 'Você fechou'} com $${dinheiro} e ${enterros} enterros. A prefeitura largou do pé e o cemitério é ${time ? 'de vocês' : 'seu'}.`, 'Jogar de novo'],
-    divida: ['Alvorada do dia ' + (CFG.dias + 1), 'A prefeitura levou tudo', `${time ? 'Vocês chegaram' : 'Você chegou'} com $${dinheiro}. Faltaram $${falta} para a dívida de $${meta}. Foram ${enterros} enterros.`, 'Tentar de novo'],
-    morte: [`Noite do dia ${dia}`, time ? 'O time inteiro caiu' : 'Você virou cliente', time ? `Nenhum coveiro ficou de pé, com $${dinheiro} no caixa. Pelo menos o enterro sai de graça.` : `O coveiro caiu no próprio cemitério com $${dinheiro} no bolso. Pelo menos o enterro sai de graça.`, 'Tentar de novo'],
+    vitoria: ['Amanhecer do dia ' + (CFG.dias + 1), 'Dívida paga', `${time ? 'Vocês fecharam' : 'Você fechou'} com $${dinheiro} e ${enterros} enterros. A prefeitura largou do seu pé, e o cemitério agora é ${time ? 'de vocês' : 'seu'}.`, 'Jogar de novo'],
+    divida: ['Amanhecer do dia ' + (CFG.dias + 1), 'A prefeitura levou tudo', `${time ? 'Vocês chegaram' : 'Você chegou'} com $${dinheiro} e faltou $${falta}. Foram ${enterros} enterros, e mesmo assim a prefeitura tomou o cemitério.`, 'Tentar de novo'],
+    morte: [`Noite do dia ${dia}`, time ? 'O time inteiro caiu' : 'Você virou cliente', time ? `Não sobrou um coveiro de pé, e ficaram $${dinheiro} no caixa. Pelo menos o enterro sai de graça.` : `O coveiro caiu no próprio cemitério com $${dinheiro} no bolso. Pelo menos o enterro sai de graça.`, 'Tentar de novo'],
   }[tipoFim] || ['Fim', 'Fim de jogo', '', 'Jogar de novo'];
   mostrarPainel(`<div class="cartao">
     <div><p class="sobre">${t[0]}</p><h2>${t[1]}</h2></div>
@@ -642,12 +784,12 @@ function mostrarFim() {
 
 function mostrarPausa() {
   mostrarPainel(`<div class="cartao">
-    <div><p class="sobre">Pausado</p><h2>O relógio parou</h2></div>
-    <p>Os mortos esperam. Os ladrões também.</p>
+    <div><p class="sobre">Dia ${dia} de ${CFG.dias}</p><h2>Pausado</h2></div>
+    <p>Pode ir no banheiro. Os mortos esperam.</p>
     <div class="botoes">
       <button class="btn" type="button" data-acao="continuar" data-principal>Continuar</button>
       <button class="btn sec" type="button" data-acao="config">Configurações</button>
-      <button class="btn sec" type="button" data-acao="sair-menu">Sair para o menu</button>
+      <button class="btn sec" type="button" data-acao="sair-menu">Sair pro menu</button>
     </div>
   </div>`);
 }
@@ -664,6 +806,7 @@ $('#painel').addEventListener('click', e => {
   const b = e.target.closest('[data-acao]');
   if (!b || b.disabled || performance.now() - painelEm < 250) return;
   const acao = b.dataset.acao;
+  if (!['ferramenta', 'bota', 'lampiao'].includes(acao)) tocarLocal('clique');
   switch (acao) {
     case 'tela-inicio': case 'tela-solo': case 'tela-multi': telaInicio = acao.slice(5); renderPainel(); break;
     case 'jogar-solo': modo = 'solo'; novoJogo(); comecarDia(); break;
@@ -831,10 +974,10 @@ function acaoPress(q) {
   if (a.tipo === 'slot') {
     const c = fila[a.i];
     if (c && !leva) {
-      q.carrega = { tipo: 'corpo', corpo: c }; fila[a.i] = null;
-      aviso(`${c.nome} quer ${ITEM[c.pedido]}. Precisa de cova ${c.especie === 'ogro' ? 'grande' : 'pequena'}.`, q);
+      q.carrega = { tipo: 'corpo', corpo: c }; fila[a.i] = null; tocar('pop', q.x);
+      aviso(`${c.nome} quer ${ITEM[c.pedido]}. ${c.especie === 'ogro' ? 'E precisa de cova grande.' : 'Cova pequena serve.'}`, q);
     } else if (!c && leva && leva.tipo === 'corpo') {
-      fila[a.i] = leva.corpo; q.carrega = null;
+      fila[a.i] = leva.corpo; q.carrega = null; tocar('pop', q.x);
     } else if (c && leva) {
       flutua(q.x, q.y - 34, 'Mãos ocupadas', COR.osso, q);
     }
@@ -844,17 +987,17 @@ function acaoPress(q) {
   if (a.tipo === 'estande') {
     if (leva && leva.tipo === 'corpo') { flutua(q.x, q.y - 34, 'Mãos ocupadas', COR.osso, q); return; }
     if (leva && leva.item === a.item) { q.carrega = null; return; }
-    q.carrega = { tipo: 'item', item: a.item };
+    q.carrega = { tipo: 'item', item: a.item }; tocar('pop', q.x);
     return;
   }
 
   if (a.tipo === 'placa') {
     const preco = CFG.precoTerreno(a.area), ar = AREAS[a.area];
     if (dinheiro >= preco) {
-      dinheiro -= preco; dono[a.area] = true;
+      dinheiro -= preco; dono[a.area] = true; tocar('compra', q.x);
       ajustarAreas(areasVisiveis());
       flutua(ar.x + ar.w / 2, ar.y + ar.h / 2 - 40, `-$${preco}`, COR.ambar);
-      aviso(`${modo === 'solo' ? 'Terreno comprado' : q.nome + ' comprou o terreno'}. Mais 12 lotes para covas.`);
+      aviso(`${modo === 'solo' ? 'Terreno comprado' : q.nome + ' comprou o terreno'}. Mais 12 covas de espaço.`);
     } else flutua(q.x, q.y - 34, `Faltam $${preco - dinheiro}`, COR.osso, q);
     return;
   }
@@ -864,16 +1007,16 @@ function acaoPress(q) {
   if (leva && leva.tipo === 'corpo' && !c.corpo) {
     const req = CFG.profundidade[leva.corpo.especie];
     if (c.prof >= req) {
-      c.corpo = leva.corpo; q.carrega = null; c.fechada = false; c.fechar = 0;
+      c.corpo = leva.corpo; q.carrega = null; c.fechada = false; c.fechar = 0; tocar('baque', c.x);
       flutua(c.x, c.y - 44, 'Na cova', COR.osso);
     } else {
-      flutua(c.x, c.y - 44, c.prof < 1 ? 'Cave primeiro' : 'Pequena demais', COR.osso, q);
+      flutua(c.x, c.y - 44, c.prof < 1 ? 'Cava primeiro' : 'Pequena demais', COR.osso, q);
     }
     return;
   }
   if (leva && leva.tipo === 'item' && c.corpo && c.fechada && c.enfeite !== c.corpo.pedido) {
     if (leva.item === c.corpo.pedido) {
-      c.enfeite = leva.item; q.carrega = null;
+      c.enfeite = leva.item; q.carrega = null; tocar('pop', c.x);
       if (!c.gorjeta) { c.gorjeta = true; ganhar(CFG.gorjeta, c.x, c.y - 48); }
       else flutua(c.x, c.y - 48, 'Enfeitada', COR.osso);
     } else {
@@ -913,22 +1056,22 @@ function segurar(q, dt, segura) {
 }
 
 function ganhar(v, x, y) {
-  dinheiro += v; stats.ganho += v;
+  dinheiro += v; stats.ganho += v; tocar('moeda', x);
   flutua(x, y, `+$${v}`, COR.ambar);
 }
 
 function colocarLampiao(q) {
   if (estado !== 'dia' && estado !== 'noite') return;
-  if (estoque <= 0) { aviso('Não tem lampião. Dá para comprar no anoitecer.', q); return; }
+  if (estoque <= 0) { aviso('Acabou o lampião. Dá pra comprar mais no anoitecer.', q); return; }
   if (lampioes.some(l => Math.hypot(l.x - q.x, l.y - q.y) < 30)) { flutua(q.x, q.y - 34, 'Já tem um aqui', COR.osso, q); return; }
-  lampioes.push({ x: Math.round(q.x), y: Math.round(q.y + 4) }); estoque--;
+  lampioes.push({ x: Math.round(q.x), y: Math.round(q.y + 4) }); estoque--; tocar('pop', q.x);
   flutua(q.x, q.y - 34, 'Lampião aceso', COR.ambar);
 }
 
 function atacar(q, e) {
   const a = Math.atan2(e.y - q.y, e.x - q.x), peso = e.peso == null ? 1 : e.peso;
   e.vida -= ferramenta().dano * (1 - (e.defesa || 0)); e.flash = .12;
-  q.cdAtaque = .35; q.golpe = .16; q.dir = a;
+  q.cdAtaque = .35; q.golpe = .16; q.dir = a; tocar('golpe', e.x);
   e.x += Math.cos(a) * 22 * peso; e.y += Math.sin(a) * 22 * peso;
   if (e.tipo === 'ladrao' && e.estado === 'roubando') e.prog = Math.max(0, e.prog - .35);
   if (e.vida <= 0) derrotar(e);
@@ -941,8 +1084,8 @@ function derrotar(e) {
   soltarMoedas(e.x, e.y, trocado + e.saque, e.saque);
   if (e.tipo === 'chefe') {
     perigos = perigos.filter(h => h.tipo === 'estrepe' && h.t >= CFG.chefe.estrepes.voo);
-    efeito('explosao', e.x, e.y); tremer(.4);
-    aviso('O chefe dos ladrões caiu! Junte as moedas.');
+    efeito('explosao', e.x, e.y); tremer(.4); tocar('explosao', e.x);
+    aviso('O chefão caiu! Corre pegar as moedas.');
   } else flutua(e.x, e.y - 30, e.saque > 0 ? 'Largou o saque!' : 'Fugiu!', COR.osso);
 }
 
@@ -969,7 +1112,7 @@ function atualizarMoedas(dt) {
     const q = jogadores.find(o => !o.caido && Math.hypot(o.x - m.x, o.y - m.y) < CFG.moedas.pegar);
     if (!q) return;
     m.pega = true;
-    dinheiro += m.v; stats.recuperado += m.rec; stats.ganho += m.v - m.rec;
+    dinheiro += m.v; stats.recuperado += m.rec; stats.ganho += m.v - m.rec; tocar('moeda', m.x);
     flutua(m.x, m.y - 20, `+$${m.v}`, COR.ambar);
   });
   moedas = moedas.filter(m => !m.pega);
@@ -977,7 +1120,7 @@ function atualizarMoedas(dt) {
 
 function ferir(q, d, fonte) {
   if (q.inv > 0 || q.caido || estado !== 'noite') return;
-  q.vida -= d; q.inv = .8; tremer(.25, q);
+  q.vida -= d; q.inv = .8; tremer(.25, q); tocar('dor', q.x);
   const a = Math.atan2(q.y - fonte.y, q.x - fonte.x);
   q.x += Math.cos(a) * 14; q.y += Math.sin(a) * 14; prender(q);
   flutua(q.x, q.y - 34, `-${d} de vida`, COR.sangue);
@@ -985,8 +1128,8 @@ function ferir(q, d, fonte) {
   q.vida = 0; q.caido = true; q.trabalhando = false;
   if (q.carrega && q.carrega.tipo === 'corpo') { const i = fila.indexOf(null); if (i >= 0) { fila[i] = q.carrega.corpo; q.carrega = null; } }
   if (jogadores.every(o => o.caido)) { fim('morte'); return; }
-  aviso('Você caiu. Volta no amanhecer.', q);
-  avisoOutros(`${q.nome} caiu. Volta no amanhecer.`, q);
+  aviso('Você caiu. Volta quando amanhecer.', q);
+  avisoOutros(`${q.nome} caiu. Volta quando amanhecer.`, q);
 }
 
 // ===== Inimigos =====
@@ -1002,6 +1145,7 @@ function novoLadrao() {
     defesa: CFG.defesa(dia), cura: CFG.cura(dia), estado: 'indo', alvo: null, prog: 0, saque: 0, cd: .6, flash: 0, dir: Math.PI,
   });
   const bruto = especie === 'brutamontes';
+  tocar('ladrao', pos.x);
   aviso(bruto ? 'Um brutamontes pulou o muro!' : 'Um ladrão pulou o muro!');
   flutua(pos.x, pos.y, bruto ? 'Brutamontes!' : 'Ladrão!', COR.sangue);
 }
@@ -1010,7 +1154,7 @@ function levantar(c) {
   const z = CFG.zumbi[c.corpo.especie];
   c.levantou = true; c.fechada = false; c.fechar = 0; c.enfeite = null;
   inimigos.push({ id: ++idInimigo, tipo: 'zumbi', especie: c.corpo.especie, x: c.x, y: c.y, r: z.r, vida: z.vida, vidaMax: z.vida, vel: z.vel, dano: z.dano, defesa: CFG.defesa(dia), cura: CFG.cura(dia), cova: c, cd: .8, flash: 0, dir: 0 });
-  flutua(c.x, c.y - 44, `${c.corpo.nome} levantou!`, COR.sangue);
+  flutua(c.x, c.y - 44, `${c.corpo.nome} levantou!`, COR.sangue); tocar('gemido', c.x);
   tremer(.2);
 }
 function devolver(z) { z.cova.levantou = false; }
@@ -1043,10 +1187,10 @@ function saida(e) {
 
 function roubar(e) {
   const c = e.alvo, v = Math.min(dinheiro, Math.round(CFG.roubo(dia) * (CFG.ladrao[e.especie] || CFG.ladrao.comum).roubo));
-  dinheiro -= v; e.saque = v; stats.roubado += v;
+  dinheiro -= v; e.saque = v; stats.roubado += v; tocar('roubo', c.x);
   c.fechada = false; c.fechar = 0; c.enfeite = null;
   flutua(c.x, c.y - 44, v > 0 ? `-$${v}` : 'Revirou a cova', COR.sangue);
-  aviso(v > 0 ? `Roubaram $${v}! Pegue o ladrão antes que ele fuja.` : 'Um ladrão revirou uma cova.');
+  aviso(v > 0 ? `Levaram $${v}! Pega o ladrão antes que ele fuja.` : 'Um ladrão revirou uma cova.');
   e.estado = 'fugindo'; e.alvo = null;
 }
 
@@ -1099,7 +1243,7 @@ function novoChefe() {
     id: ++idInimigo, tipo: 'chefe', especie: '', x, y: 6, r: cf.r, vida, vidaMax: vida, vel: cf.vel, peso: 0,
     defesa: CFG.defesa(dia), cura: CFG.cura(dia) / 2, estado: 'andando', prog: 0, saque: 0, cd: 2.5, cdGolpe: 0, flash: 0, dir: Math.PI / 2, ultimo: '',
   });
-  aviso('O chefe dos ladrões pulou o muro!'); tremer(.5);
+  aviso('O chefe dos ladrões pulou o muro!'); tremer(.5); tocar('chefe', x);
   flutua(x, 70, 'Chefão!', COR.sangue);
 }
 
@@ -1111,7 +1255,7 @@ function atualizarChefe(e, dt) {
   if (e.estado === 'andando') {
     const d = dist(e, q);
     if (d > e.r + q.r + 8) andarAte(e, q.x, q.y, e.vel * dt); else mirar();
-    if (d < e.r + q.r + cf.golpe.alcance && e.cdGolpe <= 0) { e.estado = 'golpe'; e.prog = 0; mirar(); }
+    if (d < e.r + q.r + cf.golpe.alcance && e.cdGolpe <= 0) { e.estado = 'golpe'; e.prog = 0; mirar(); tocar('alerta', e.x); }
     else if (e.cd <= 0) comecarAtaque(e, q);
   } else if (e.estado === 'golpe') {
     e.prog += dt / cf.golpe.preparo;
@@ -1152,12 +1296,13 @@ function comecarAtaque(e, q) {
   const cf = CFG.chefe, a = escolha(['bombas', 'investida', 'estrepes'].filter(x => x !== e.ultimo));
   e.ultimo = a; e.prog = 0;
   e.cd = rnd(cf.intervalo[0], cf.intervalo[1]);
-  if (a === 'investida') { e.estado = 'mirando'; e.dir = Math.atan2(q.y - e.y, q.x - e.x); e.cd += cf.investida.mira + cf.investida.tonto; }
+  if (a === 'investida') { tocar('alerta', e.x); e.estado = 'mirando'; e.dir = Math.atan2(q.y - e.y, q.x - e.x); e.cd += cf.investida.mira + cf.investida.tonto; }
   else { e.estado = 'arremessando'; e.jogar = a; }
 }
 
 function arremessar(e, a, q) {
   const cf = CFG.chefe, ox = e.x, oy = e.y - e.r;
+  tocar('arremesso', e.x);
   if (a === 'bombas') {
     const n = cf.bombas.n + Math.max(0, jogadores.length - 1);
     for (let i = 0; i < n; i++) {
@@ -1182,7 +1327,7 @@ function atualizarPerigos(dt) {
     if (h.tipo === 'bomba') {
       if (h.t < h.dur) return;
       h.fim = true;
-      efeito('explosao', h.x, h.y); tremer(.15);
+      efeito('explosao', h.x, h.y); tremer(.15); tocar('explosao', h.x);
       jogadores.forEach(o => { if (!o.caido && Math.hypot(o.x - h.x, o.y - h.y) < cf.bombas.raio + o.r * .5) ferir(o, cf.bombas.dano, h); });
     } else {
       if (h.t >= h.dur) { h.fim = true; return; }
@@ -1199,7 +1344,7 @@ function atualizarPerigos(dt) {
 // Para criar outro, some uma entrada aqui e os números dele em CFG.eventos.
 const EVENTOS = {
   vento: {
-    aviso: 'O vento está ficando forte...',
+    aviso: 'Tá começando a ventar forte...',
     comecar(ev) { ev.frente = -80; ev.feitas = new Set(); aviso('Ventania! Segura o chapéu.'); },
     // Uma frente de vento atravessa o cemitério da esquerda para a direita: leva as rosas e apaga as velas por onde passa
     passo(ev, dt) {
@@ -1321,6 +1466,7 @@ function atualizar(dt) {
   flutuantes.forEach(f => { f.t += dt; f.y -= 22 * dt; });
   flutuantes = flutuantes.filter(f => f.t < 1.4);
   atualizarSoltas(dt);
+  atualizarSom(dt);
 
   if (modo === 'convidado') {
     if (estado === 'dia' || estado === 'noite') {
@@ -1345,7 +1491,7 @@ function atualizar(dt) {
     tChegada += dt;
     if (tChegada >= CFG.intervaloChegada / (0.5 + 0.5 * jogadores.length)) {
       tChegada = 0;
-      if (chegar()) flutua(96, 96, 'Chegou mais um', COR.osso);
+      if (chegar()) flutua(96, 96, 'Chegou defunto', COR.osso);
     }
     atualizarEvento(dt);
     if (relogio <= 0) anoitecer();
@@ -1395,7 +1541,7 @@ function erroRede(msg) {
   peer = null; conexaoAnfitriao = null; conexoes.clear();
   modo = 'solo'; p.id = 'eu'; jogadores = [p];
   estado = 'conexao';
-  mostrarMensagem('Não conectou', msg, 'Voltar ao início');
+  mostrarMensagem('Não conectou', msg, 'Voltar');
 }
 
 // Sai de qualquer partida e volta para uma das telas de antes do jogo ('inicio' ou 'multi')
@@ -1409,8 +1555,8 @@ function voltarInicio(tela = 'inicio') {
 
 async function criarSala() {
   estado = 'conexao';
-  mostrarMensagem('Criando a sala', 'Conectando ao servidor do multiplayer.');
-  try { await carregarPeer(); } catch (e) { erroRede('Não deu para carregar o multiplayer. Confira a internet e tente de novo.'); return; }
+  mostrarMensagem('Criando a sala', 'Só um segundo, tá conectando.');
+  try { await carregarPeer(); } catch (e) { erroRede('Não deu pra carregar o online. Confere a internet e tenta de novo.'); return; }
   codigoSala = novoCodigo();
   const este = peer = new Peer(PREFIXO + codigoSala);
   este.on('open', () => {
@@ -1423,8 +1569,8 @@ async function criarSala() {
   este.on('error', e => {
     if (peer !== este) return;
     if (e.type === 'unavailable-id') { este.destroy(); peer = null; criarSala(); return; }
-    if (modo === 'anfitriao') { if (e.type !== 'peer-unavailable') avisoLocal('Instabilidade na conexão (' + e.type + ').'); return; }
-    erroRede('Não deu para criar a sala (' + e.type + '). Tente de novo.');
+    if (modo === 'anfitriao') { if (e.type !== 'peer-unavailable') avisoLocal('A conexão tá instável (' + e.type + ').'); return; }
+    erroRede('Não deu pra criar a sala (' + e.type + '). Tenta de novo.');
   });
 }
 
@@ -1512,9 +1658,9 @@ async function entrarSala(codigo) {
   if (codigo.length !== 4) { avisoLocal('O código da sala tem 4 letras.'); return; }
   estado = 'conexao';
   mostrarMensagem('Entrando', `Procurando a sala ${codigo}.`);
-  try { await carregarPeer(); } catch (e) { erroRede('Não deu para carregar o multiplayer. Confira a internet e tente de novo.'); return; }
+  try { await carregarPeer(); } catch (e) { erroRede('Não deu pra carregar o online. Confere a internet e tenta de novo.'); return; }
   const este = peer = new Peer();
-  const limite = setTimeout(() => { if (peer === este && modo !== 'convidado') erroRede(`Não achei a sala ${codigo}. Confira o código ou peça um link novo.`); }, 15000);
+  const limite = setTimeout(() => { if (peer === este && modo !== 'convidado') erroRede(`Não achei a sala ${codigo}. Confere o código ou pede um link novo.`); }, 15000);
   este.on('open', () => {
     const conn = este.connect(PREFIXO + codigo, { serialization: 'json', reliable: true });
     conn.on('open', () => { conexaoAnfitriao = conn; codigoSala = codigo; enviarEntrada(true); });
@@ -1525,16 +1671,16 @@ async function entrarSala(codigo) {
         modo = 'convidado'; p.id = d.id; jogadores = [p]; assinatura = '';
         estado = 'sala'; renderPainel();
       } else if (d.t === 'cheia') {
-        clearTimeout(limite); erroRede('Essa sala já está com 4 coveiros.');
+        clearTimeout(limite); erroRede('Essa sala já tá lotada, com 4 coveiros.');
       } else if (d.t === 'mundo' && modo === 'convidado') aplicarMundo(d);
     });
-    conn.on('close', () => { if (peer === este && modo === 'convidado') { modo = 'solo'; estado = 'conexao'; mostrarMensagem('O anfitrião saiu', 'A partida acabou porque quem criou a sala saiu ou perdeu a conexão.', 'Voltar ao início'); } });
+    conn.on('close', () => { if (peer === este && modo === 'convidado') { modo = 'solo'; estado = 'conexao'; mostrarMensagem('Quem criou a sala saiu', 'Ou caiu da internet. Sem ele a partida acaba pra todo mundo.', 'Voltar'); } });
   });
   este.on('error', e => {
     if (peer !== este) return;
-    if (modo === 'convidado') { avisoLocal('Instabilidade na conexão (' + e.type + ').'); return; }
+    if (modo === 'convidado') { avisoLocal('A conexão tá instável (' + e.type + ').'); return; }
     clearTimeout(limite);
-    erroRede(e.type === 'peer-unavailable' ? `Não achei a sala ${codigo}. Confira o código ou peça um link novo.` : `Não deu para conectar (${e.type}). Tente de novo.`);
+    erroRede(e.type === 'peer-unavailable' ? `Não achei a sala ${codigo}. Confere o código ou pede um link novo.` : `Não deu pra conectar (${e.type}). Tenta de novo.`);
   });
 }
 
@@ -1583,6 +1729,7 @@ function aplicarMundo(m) {
     if (ev.para && ev.para !== p.id) return;
     if (ev.exceto && ev.exceto === p.id) return;
     if (ev.f) flutuantes.push({ x: ev.f[0], y: ev.f[1], txt: String(ev.f[2]), cor: corSegura(ev.f[3]), t: 0 });
+    if (Array.isArray(ev.s)) tocarLocal(String(ev.s[0]), ev.s[1] == null ? null : +ev.s[1] || 0);
     if (ev.fx && ['rosa', 'fumaca', 'explosao'].includes(ev.fx[0])) efeitoLocal(ev.fx[0], +ev.fx[1] || 0, +ev.fx[2] || 0);
     if (ev.a) avisoLocal(String(ev.a));
     if (ev.tr && config.tremor) tremor = Math.max(tremor, +ev.tr || 0);
@@ -1613,7 +1760,7 @@ function copiarLink() {
     if (!el) return;
     const r = document.createRange(); r.selectNodeContents(el);
     const s = getSelection(); s.removeAllRanges(); s.addRange(r);
-    if (b) b.textContent = 'Selecionado. Copie com Ctrl+C';
+    if (b) b.textContent = 'Selecionado. Copia com Ctrl+C';
   };
   try { navigator.clipboard.writeText(linkSala()).then(() => { if (b) b.textContent = 'Link copiado'; }, selecionar); }
   catch (e) { selecionar(); }
@@ -2290,7 +2437,7 @@ function atualizarHUD() {
 
 function textoDica() {
   if (estado !== 'dia' && estado !== 'noite') return '';
-  if (p.caido) return 'Você caiu. Volta no amanhecer.';
+  if (p.caido) return 'Você caiu. Volta quando amanhecer.';
   const K = toque ? 'Ação' : 'Espaço';
   if (inimigoPerto(p, 40)) return `<b>${K}</b>: bater`;
   const a = alvoAtual(p), leva = p.carrega;
@@ -2301,31 +2448,31 @@ function textoDica() {
     const c = fila[a.i];
     if (c && !leva) acao = `<b>${K}</b>: pegar ${esc(c.nome)} (${c.especie === 'ogro' ? 'ogro' : 'humano'}, quer ${ITEM[c.pedido] || ''})`;
     else if (c && leva) acao = 'Mãos ocupadas';
-    else if (!c && leva && leva.tipo === 'corpo') acao = `<b>${K}</b>: devolver para a carroça`;
+    else if (!c && leva && leva.tipo === 'corpo') acao = `<b>${K}</b>: devolver pra carroça`;
   } else if (a && a.tipo === 'estande') {
     if (leva && leva.tipo === 'corpo') acao = 'Mãos ocupadas';
     else if (leva && leva.item === a.item) acao = `<b>${K}</b>: devolver ${ITEM[a.item]}`;
     else acao = `<b>${K}</b>: pegar ${ITEM[a.item]}`;
   } else if (a && a.tipo === 'placa') {
     const preco = CFG.precoTerreno(a.area);
-    acao = dinheiro >= preco ? `<b>${K}</b>: comprar este terreno por $${preco}` : `Terreno à venda por $${preco}. Faltam $${preco - dinheiro}.`;
+    acao = dinheiro >= preco ? `<b>${K}</b>: comprar esse terreno por $${preco}` : `Terreno à venda por $${preco}. Faltam $${preco - dinheiro}.`;
   } else if (a && a.tipo === 'cova') {
     const c = a.cova;
     if (c.levantou) acao = 'Cova vazia. O morto saiu andando.';
     else if (!c.corpo) {
       const req = leva && leva.tipo === 'corpo' ? CFG.profundidade[leva.corpo.especie] : 0;
-      if (req && c.prof >= req) acao = `<b>${K}</b>: colocar ${esc(leva.corpo.nome)} na cova`;
-      else if (c.prof < 2) acao = `Segure <b>${K}</b> para cavar${req === 2 ? ' (ogro precisa de cova grande)' : ''}`;
+      if (req && c.prof >= req) acao = `<b>${K}</b>: botar ${esc(leva.corpo.nome)} na cova`;
+      else if (c.prof < 2) acao = `Segura <b>${K}</b> pra cavar${req === 2 ? ' (ogro precisa de cova grande)' : ''}`;
       else acao = 'Cova grande pronta';
-    } else if (!c.fechada) acao = `Segure <b>${K}</b> para fechar a cova`;
+    } else if (!c.fechada) acao = `Segura <b>${K}</b> pra fechar a cova`;
     else if (c.enfeite !== c.corpo.pedido) {
       acao = leva && leva.tipo === 'item' && leva.item === c.corpo.pedido
         ? `<b>${K}</b>: colocar ${ITEM[leva.item]}`
-        : c.enfeite === 'apagada' ? `A vela de ${esc(c.corpo.nome)} apagou. Tem vela nova no canto de baixo, à esquerda.`
-        : `${esc(c.corpo.nome)} quer ${ITEM[c.corpo.pedido] || ''}. Tem no canto de baixo, à esquerda.`;
+        : c.enfeite === 'apagada' ? `A vela de ${esc(c.corpo.nome)} apagou. Tem vela nova lá embaixo, à esquerda.`
+        : `${esc(c.corpo.nome)} quer ${ITEM[c.corpo.pedido] || ''}. Tem lá embaixo, à esquerda.`;
     } else acao = `${esc(c.corpo.nome)} descansa em paz`;
   }
-  if (!acao && !levaTxt) return estado === 'noite' ? 'Proteja as covas. Ladrão não chega perto de lampião.' : '';
+  if (!acao && !levaTxt) return estado === 'noite' ? 'Protege as covas. Ladrão não chega perto de lampião.' : '';
   return [levaTxt, acao].filter(Boolean).join(' · ');
 }
 
