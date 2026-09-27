@@ -105,6 +105,7 @@ kbd{font-family:inherit;font-size:.85em;font-weight:600;padding:1px 6px;border-r
       <span class="dinheiro num"><b id="hud-dinheiro">$0</b><span id="hud-meta">de $200</span></span>
       <span id="hud-vida" aria-label="Vida"></span>
       <span id="hud-ferramenta" class="chip">Mãos</span>
+      <span id="hud-bota" class="chip" hidden></span>
       <span id="hud-lampioes" class="chip">Lampiões 0</span>
       <span id="hud-sala" class="chip" hidden></span>
     </div>
@@ -143,7 +144,9 @@ const CFG = {
   vidaMax: 5,
   precoLampiao: 15,
   raioLampiao: 95,
-  precoTerreno: [0, 60, 100],
+  // Terreno sem fim: sempre há 2 à venda depois do último comprado, cada um mais caro (60, 100, 150, 225...)
+  precoTerreno: i => (i === 0 ? 0 : i === 1 ? 60 : Math.round(20 * 1.5 ** (i - 2)) * 5),
+  terrenosAVenda: 2,
   maxJogadores: 4,
   ferramentas: [
     { nome: 'Mãos', preco: 0, cavar: 1, dano: 1, desc: '' },
@@ -151,20 +154,49 @@ const CFG = {
     { nome: 'Cavadeira', preco: 90, cavar: 3, dano: 3, desc: 'Cava e fecha 3× mais rápido que as mãos. Bate com força 3.' },
     { nome: 'Escavadeira', preco: 180, cavar: 5, dano: 5, desc: 'Cava e fecha 5× mais rápido que as mãos. Ogro nenhum segura.' },
   ],
-  ladroes: d => 1 + Math.floor(d / 2),
+  botas: [
+    { nome: 'Botina', preco: 0, vel: 1, desc: '' },
+    { nome: 'Bota de couro', preco: 25, vel: 1.2, desc: 'Anda 20% mais rápido.' },
+    { nome: 'Bota de cano alto', preco: 60, vel: 1.4, desc: 'Anda 40% mais rápido que de botina.' },
+    { nome: 'Bota de sete léguas', preco: 120, vel: 1.65, desc: 'Anda 65% mais rápido que de botina. Atravessa o cemitério num pulo.' },
+  ],
+  // Bichos da noite: poucos no começo, muitos no fim, e a cada dia com mais defesa e mais cura
+  ladroes: d => Math.max(1, Math.round(0.25 * d * d + 0.75)), // 1, 2, 3, 5, 7
+  chanceBrutamontes: d => Math.min(0.5, Math.max(0, 0.15 * (d - 2))), // aparece a partir do dia 3
+  defesa: d => Math.min(0.6, 0.08 * (d - 1)), // parte do golpe que o bicho segura
+  cura: d => 0.12 * (d - 1),                  // vida que o bicho recupera por segundo
   roubo: d => 8 + 2 * d,
   tempoRoubo: 5,
+  ladrao: {
+    comum: { vida: d => 2 + Math.floor(d / 3), vel: 92, r: 13, dano: 1, roubo: 1, peso: 1 },
+    brutamontes: { vida: d => 6 + d, vel: 70, r: 18, dano: 2, roubo: 1.5, peso: 0.5 },
+  },
   zumbi: {
     humano: { vida: 3, vel: 62, dano: 1, r: 13 },
     ogro: { vida: 8, vel: 46, dano: 2, r: 19 },
+  },
+  // Ladrão derrubado solta moedas no chão: o que ele levou mais um trocado. Passe por cima para pegar
+  moedas: { ladrao: d => 2 + d, brutamontes: d => 6 + 2 * d, chefe: 40, valor: 3, pegar: 26 },
+  // Chefão: vem na última noite. Todo ataque dele avisa antes de acertar
+  chefe: {
+    vida: 50, vel: 58, r: 34, chegaEm: 5, duracaoNoite: 100, roubo: 6,
+    intervalo: [3, 4.5], // pausa entre um ataque especial e outro
+    golpe: { preparo: 0.55, alcance: 30, dano: 2 },
+    bombas: { n: 3, raio: 46, voo: 1.3, dano: 1 },
+    investida: { mira: 0.9, vel: 540, alcance: 360, dano: 2, tonto: 1.4 },
+    estrepes: { n: 6, voo: 0.6, dura: 9, dano: 1 },
+  },
+  // Eventos do dia: no máximo um por dia, sorteado quando o dia começa
+  eventos: {
+    vento: { desdeDia: 2, chance: 0.6, aviso: 3, velocidade: 300, pegaCova: 0.75 },
   },
 };
 // Endereço público do jogo, mostrado a quem abre pelo Claude (onde o online não funciona)
 const LINK_ABERTO = 'https://lyiu-10.github.io/coveiro/';
 
 // ===== Mundo =====
-const W = 960, H = 560;
-const AREAS = [0, 1, 2].map(i => ({ x: 210 + i * 250, y: 60, w: 236, h: 460 }));
+const W = 960, H = 560; // tamanho da tela; o mundo cresce para a direita conforme compra terreno
+const AREA = { x0: 210, passo: 250, y: 60, w: 236, h: 460 };
 const SLOTS = [0, 1, 2, 3].map(i => ({ x: 96, y: 132 + i * 72 }));
 const ESTANDES = [{ item: 'rosa', x: 64, y: 474 }, { item: 'vela', x: 140, y: 474 }];
 const CORES = ['#3d3550', '#2f6070', '#7a3b2e', '#56692f'];
@@ -212,9 +244,12 @@ let escala = 1, dpr = 1;
 let modo = 'solo'; // solo | anfitriao | convidado
 let estado = 'titulo', estadoPausado = null;
 let dia = 1, dinheiro = 0, relogio = CFG.duracaoDia, tChegada = 0, tNoite = 0, tLimpa = 0;
-let nivelFerr = 0, dono = [true, false, false], estoque = 0, meta = CFG.meta, tipoFim = null;
+let nivelFerr = 0, nivelBota = 0, dono = [true], estoque = 0, meta = CFG.meta, tipoFim = null;
 let fila = [null, null, null, null], covas = [], lampioes = [], inimigos = [], flutuantes = [], agenda = [];
-let stats = { ganho: 0, roubado: 0, recuperado: 0 }, idCorpo = 0, idInimigo = 0;
+let AREAS = [], mundoW = W, camX = 0, camDesenho = 0;
+let evento = null, eventoHoje = null, tChefe = null, moedas = [], perigos = [];
+let soltas = [], rajadas = [], folhas = [], ventoVis = 0;
+let stats = { ganho: 0, roubado: 0, recuperado: 0 }, idCorpo = 0, idInimigo = 0, idMoeda = 0;
 let escuro = 0.35, tremor = 0, tempo = 0, painelEm = 0;
 const novoJogador = (id, nome, cor) => ({
   id, nome, cor, x: 184, y: 300, r: 14, dir: 0, carrega: null, vida: CFG.vidaMax, inv: 0, cdAtaque: 0, golpe: 0,
@@ -223,25 +258,35 @@ const novoJogador = (id, nome, cor) => ({
 const p = novoJogador('eu', lerNome(), CORES[0]);
 let jogadores = [p];
 const ferramenta = () => CFG.ferramentas[nivelFerr];
+const bota = () => CFG.botas[nivelBota];
 const teclas = new Set();
 const joy = { x: 0, y: 0 };
 let acaoToque = false;
 
-function criarCovas() {
-  covas = [];
-  AREAS.forEach((a, ai) => {
+// Cria (ou apaga) áreas até ficar com n. Cada área tem 12 lotes, e a cova i é sempre a mesma em todas as máquinas
+function ajustarAreas(n) {
+  while (AREAS.length > n) { AREAS.pop(); covas.length -= 12; }
+  while (AREAS.length < n) {
+    const ai = AREAS.length, a = { x: AREA.x0 + ai * AREA.passo, y: AREA.y, w: AREA.w, h: AREA.h };
+    AREAS.push(a);
     for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) covas.push({
       area: ai, x: a.x + 30 + c * 58, y: a.y + 80 + r * 150, w: 38, h: 64,
       prof: 0, corpo: null, fechada: false, fechar: 0, enfeite: null,
       pago: false, gorjeta: false, levantou: false, levantarEm: null,
     });
-  });
+  }
+  while (dono.length < n) dono.push(false);
+  dono.length = n;
+  mundoW = Math.max(W, AREAS[n - 1].x + AREA.w + 14);
 }
+const areasVisiveis = () => dono.lastIndexOf(true) + 1 + CFG.terrenosAVenda;
 
 function novoJogo() {
-  dia = 1; dinheiro = 0; nivelFerr = 0; dono = AREAS.map((_, i) => i === 0); estoque = 0; relogio = CFG.duracaoDia; tipoFim = null;
+  dia = 1; dinheiro = 0; nivelFerr = 0; nivelBota = 0; estoque = 0; relogio = CFG.duracaoDia; tipoFim = null;
   fila = [null, null, null, null]; lampioes = []; inimigos = []; flutuantes = []; agenda = [];
-  criarCovas();
+  evento = null; eventoHoje = null; tChefe = null; moedas = []; perigos = []; soltas = []; camX = 0;
+  AREAS = []; covas = []; dono = [true];
+  ajustarAreas(areasVisiveis());
   meta = metaPara(jogadores.length);
   jogadores.forEach((q, i) => Object.assign(q, { x: 184, y: 250 + i * 34, dir: 0, carrega: null, vida: CFG.vidaMax, inv: 0, cdAtaque: 0, golpe: 0, caido: false, trabalhando: false }));
   stats = { ganho: 0, roubado: 0, recuperado: 0 };
@@ -249,6 +294,8 @@ function novoJogo() {
 }
 const metaPara = n => Math.round(CFG.meta * (0.5 + 0.5 * n));
 const nLadroes = () => CFG.ladroes(dia) + Math.max(0, jogadores.length - 1);
+const ultimaNoite = () => dia >= CFG.dias;
+const duracaoNoite = () => (ultimaNoite() ? CFG.chefe.duracaoNoite : CFG.duracaoNoite);
 
 function chegar(especie) {
   const i = fila.indexOf(null);
@@ -267,19 +314,21 @@ const iluminada = c => lampioes.some(l => Math.hypot(l.x - c.x, l.y - c.y) < CFG
 function comecarDia() {
   estado = 'dia'; relogio = CFG.duracaoDia; tChegada = 0; stats.ganho = 0;
   if (dia > 1) chegar();
+  sortearEvento();
   renderPainel();
   aviso(dia === 1 ? 'Pegue o primeiro corpo na carroça, à esquerda.' : `Dia ${dia}. A carroça chegou.`);
 }
 
 function anoitecer() {
-  estado = 'loja'; soltar();
+  estado = 'loja'; soltar(); evento = null; eventoHoje = null;
   renderPainel();
 }
 
 function comecarNoite() {
-  estado = 'noite'; relogio = CFG.duracaoNoite; tNoite = 0; tLimpa = 0; stats.roubado = 0; stats.recuperado = 0;
-  const n = nLadroes();
-  agenda = Array.from({ length: n }, (_, i) => 2 + i * (8 / Math.max(1, jogadores.length * .75)) + rnd(0, 2)).sort((a, b) => a - b);
+  estado = 'noite'; relogio = duracaoNoite(); tNoite = 0; tLimpa = 0; stats.roubado = 0; stats.recuperado = 0;
+  const n = nLadroes(), passo = Math.min(8, 42 / n) / Math.max(1, jogadores.length * .75);
+  agenda = Array.from({ length: n }, (_, i) => 2 + i * passo + rnd(0, 2)).sort((a, b) => a - b);
+  tChefe = ultimaNoite() ? CFG.chefe.chegaEm : null;
   covas.forEach(c => { if (malResolvida(c)) c.levantarEm = rnd(3, 10); });
   renderPainel();
   aviso(n === 1 ? 'Anoiteceu. Um ladrão vem aí.' : `Anoiteceu. ${n} ladrões vêm aí.`);
@@ -287,7 +336,7 @@ function comecarNoite() {
 
 function amanhecer() {
   inimigos.forEach(e => { if (e.tipo === 'zumbi') devolver(e); });
-  inimigos = [];
+  inimigos = []; perigos = []; tChefe = null;
   covas.forEach(c => { c.levantarEm = null; });
   jogadores.forEach(q => { q.vida = CFG.vidaMax; q.inv = 0; q.caido = false; });
   soltar();
@@ -309,6 +358,9 @@ function comprar(item) {
   if (item === 'ferramenta') {
     const f = CFG.ferramentas[nivelFerr + 1];
     if (f && dinheiro >= f.preco) { dinheiro -= f.preco; nivelFerr++; }
+  } else if (item === 'bota') {
+    const b = CFG.botas[nivelBota + 1];
+    if (b && dinheiro >= b.preco) { dinheiro -= b.preco; nivelBota++; }
   } else if (item === 'lampiao' && dinheiro >= CFG.precoLampiao) { dinheiro -= CFG.precoLampiao; estoque++; }
   if (estado === 'loja') mostrarLoja();
 }
@@ -386,17 +438,20 @@ function mostrarSala() {
 }
 
 function mostrarLoja() {
-  const f = CFG.ferramentas[nivelFerr + 1];
+  const f = CFG.ferramentas[nivelFerr + 1], b = CFG.botas[nivelBota + 1];
   const n = nLadroes();
   const btn = (acao, preco) => `<button type="button" data-acao="${acao}"${dinheiro >= preco ? '' : ' disabled'}>$${preco}</button>`;
   mostrarPainel(`<div class="cartao">
     <div><p class="sobre">Anoitecer do dia ${dia} de ${CFG.dias}</p><h2>Loja do coveiro</h2></div>
     <div class="saldo"><b>$${dinheiro}</b><span>no bolso · a dívida de $${meta} vence na alvorada do dia ${CFG.dias + 1}</span></div>
-    <div class="alerta">${n === 1 ? 'Um ladrão vem' : n + ' ladrões vêm'} esta noite. A noite acaba quando o cemitério ficar limpo.</div>
+    <div class="alerta">${n === 1 ? 'Um ladrão vem' : n + ' ladrões vêm'} esta noite${ultimaNoite() ? ', e o chefe deles vem junto. Cada golpe dele leva dinheiro do seu bolso' : ''}. A noite acaba quando o cemitério ficar limpo.</div>
     <ul class="loja">
       ${f
         ? `<li><div><b>${f.nome}</b><small>${f.desc}</small></div>${btn('ferramenta', f.preco)}</li>`
         : `<li><div><b>${ferramenta().nome}</b><small>Vocês já têm a melhor ferramenta.</small></div></li>`}
+      ${b
+        ? `<li><div><b>${b.nome}</b><small>${b.desc}</small></div>${btn('bota', b.preco)}</li>`
+        : `<li><div><b>${bota().nome}</b><small>Vocês já têm a bota mais rápida.</small></div></li>`}
       <li><div><b>Lampião</b><small>Ladrão não mexe em cova iluminada. Coloque com ${toque ? 'o botão Lampião' : '<kbd>Q</kbd>'}. ${modo === 'solo' ? 'Você tem' : 'O time tem'} ${estoque}.</small></div>${btn('lampiao', CFG.precoLampiao)}</li>
     </ul>
     ${modo !== 'convidado' ? '<button class="btn" type="button" data-acao="noite" data-principal>Encarar a noite</button>' : esperando('encarar a noite')}
@@ -465,7 +520,7 @@ $('#painel').addEventListener('click', e => {
     case 'reiniciar': novoJogo(); comecarDia(); break;
     case 'copiar': copiarLink(); break;
     case 'voltar': voltarInicio(); break;
-    case 'ferramenta': case 'lampiao':
+    case 'ferramenta': case 'bota': case 'lampiao':
       if (modo === 'convidado') { p.compraSeq++; p.compraItem = acao; enviarEntrada(true); } else comprar(acao);
       break;
   }
@@ -491,7 +546,7 @@ function avisoOutros(txt, q) {
   if (modo === 'anfitriao') eventos.push({ a: txt, exceto: q.id });
 }
 function flutua(x, y, txt, cor, q) {
-  const f = { x: Math.max(70, Math.min(W - 70, x)), y: Math.max(56, Math.min(H - 20, y)), txt, cor, t: 0 };
+  const f = { x: Math.max(70, Math.min(mundoW - 70, x)), y: Math.max(56, Math.min(H - 20, y)), txt, cor, t: 0 };
   if (!q || q === p) flutuantes.push(f);
   if (modo === 'anfitriao' && q !== p) eventos.push({ f: [Math.round(f.x), Math.round(f.y), txt, cor], para: q ? q.id : undefined });
 }
@@ -606,9 +661,10 @@ function acaoPress(q) {
   }
 
   if (a.tipo === 'placa') {
-    const preco = CFG.precoTerreno[a.area], ar = AREAS[a.area];
+    const preco = CFG.precoTerreno(a.area), ar = AREAS[a.area];
     if (dinheiro >= preco) {
       dinheiro -= preco; dono[a.area] = true;
+      ajustarAreas(areasVisiveis());
       flutua(ar.x + ar.w / 2, ar.y + ar.h / 2 - 40, `-$${preco}`, COR.ambar);
       aviso(`${modo === 'solo' ? 'Terreno comprado' : q.nome + ' comprou o terreno'}. Mais 12 lotes para covas.`);
     } else flutua(q.x, q.y - 34, `Faltam $${preco - dinheiro}`, COR.osso, q);
@@ -682,10 +738,10 @@ function colocarLampiao(q) {
 }
 
 function atacar(q, e) {
-  const a = Math.atan2(e.y - q.y, e.x - q.x);
-  e.vida -= ferramenta().dano; e.flash = .12;
+  const a = Math.atan2(e.y - q.y, e.x - q.x), peso = e.peso == null ? 1 : e.peso;
+  e.vida -= ferramenta().dano * (1 - (e.defesa || 0)); e.flash = .12;
   q.cdAtaque = .35; q.golpe = .16; q.dir = a;
-  e.x += Math.cos(a) * 22; e.y += Math.sin(a) * 22;
+  e.x += Math.cos(a) * 22 * peso; e.y += Math.sin(a) * 22 * peso;
   if (e.tipo === 'ladrao' && e.estado === 'roubando') e.prog = Math.max(0, e.prog - .35);
   if (e.vida <= 0) derrotar(e);
 }
@@ -693,10 +749,42 @@ function atacar(q, e) {
 function derrotar(e) {
   e.remover = true;
   if (e.tipo === 'zumbi') { devolver(e); flutua(e.x, e.y - 30, 'De volta pra cova', COR.osso); return; }
-  if (e.saque > 0) {
-    dinheiro += e.saque; stats.recuperado += e.saque;
-    flutua(e.x, e.y - 30, `+$${e.saque} de volta`, COR.ambar);
-  } else flutua(e.x, e.y - 30, 'Fugiu!', COR.osso);
+  const trocado = e.tipo === 'chefe' ? CFG.moedas.chefe : CFG.moedas[e.especie === 'brutamontes' ? 'brutamontes' : 'ladrao'](dia);
+  soltarMoedas(e.x, e.y, trocado + e.saque, e.saque);
+  if (e.tipo === 'chefe') {
+    perigos = perigos.filter(h => h.tipo === 'estrepe' && h.t >= CFG.chefe.estrepes.voo);
+    efeito('explosao', e.x, e.y); tremer(.4);
+    aviso('O chefe dos ladrões caiu! Junte as moedas.');
+  } else flutua(e.x, e.y - 30, e.saque > 0 ? 'Largou o saque!' : 'Fugiu!', COR.osso);
+}
+
+// ===== Moedas no chão =====
+// total em moedas espalhadas; rec é a parte que era dinheiro roubado e volta
+function soltarMoedas(x, y, total, rec) {
+  const n = Math.min(12, Math.max(1, Math.ceil(total / CFG.moedas.valor)));
+  for (let i = 0; i < n; i++) {
+    const v = Math.floor(total / n) + (i < total % n ? 1 : 0);
+    if (v <= 0) continue;
+    const r = Math.min(v, rec), a = rnd(0, TAU), d = rnd(12, 34 + n * 3);
+    rec -= r;
+    moedas.push({
+      id: ++idMoeda, v, rec: r, t: 0, ox: x, oy: y,
+      x: Math.max(20, Math.min(mundoW - 20, x + Math.cos(a) * d)), y: Math.max(52, Math.min(H - 16, y + Math.sin(a) * d)),
+    });
+  }
+}
+const MOEDA_VOO = .4;
+function atualizarMoedas(dt) {
+  moedas.forEach(m => {
+    m.t += dt;
+    if (m.t < MOEDA_VOO) return;
+    const q = jogadores.find(o => !o.caido && Math.hypot(o.x - m.x, o.y - m.y) < CFG.moedas.pegar);
+    if (!q) return;
+    m.pega = true;
+    dinheiro += m.v; stats.recuperado += m.rec; stats.ganho += m.v - m.rec;
+    flutua(m.x, m.y - 20, `+$${m.v}`, COR.ambar);
+  });
+  moedas = moedas.filter(m => !m.pega);
 }
 
 function ferir(q, d, fonte) {
@@ -715,19 +803,25 @@ function ferir(q, d, fonte) {
 
 // ===== Inimigos =====
 function novoLadrao() {
+  const especie = Math.random() < CFG.chanceBrutamontes(dia) ? 'brutamontes' : 'comum';
+  const t = CFG.ladrao[especie], vida = t.vida(dia);
   const lado = escolha(['direita', 'baixo', 'cima']);
-  const pos = lado === 'direita' ? { x: W + 16, y: rnd(80, H - 40) }
-    : lado === 'baixo' ? { x: rnd(260, W - 30), y: H + 16 }
-    : { x: rnd(260, W - 30), y: 18 };
-  inimigos.push({ id: ++idInimigo, tipo: 'ladrao', x: pos.x, y: pos.y, r: 13, vida: 2 + Math.floor(dia / 3), vel: 92, estado: 'indo', alvo: null, prog: 0, saque: 0, cd: .6, flash: 0, dir: Math.PI });
-  aviso('Um ladrão pulou o muro!');
-  flutua(pos.x, pos.y, 'Ladrão!', COR.sangue);
+  const pos = lado === 'direita' ? { x: mundoW + 16, y: rnd(80, H - 40) }
+    : lado === 'baixo' ? { x: rnd(260, mundoW - 30), y: H + 16 }
+    : { x: rnd(260, mundoW - 30), y: 18 };
+  inimigos.push({
+    id: ++idInimigo, tipo: 'ladrao', especie, x: pos.x, y: pos.y, r: t.r, vida, vidaMax: vida, vel: t.vel, dano: t.dano, peso: t.peso,
+    defesa: CFG.defesa(dia), cura: CFG.cura(dia), estado: 'indo', alvo: null, prog: 0, saque: 0, cd: .6, flash: 0, dir: Math.PI,
+  });
+  const bruto = especie === 'brutamontes';
+  aviso(bruto ? 'Um brutamontes pulou o muro!' : 'Um ladrão pulou o muro!');
+  flutua(pos.x, pos.y, bruto ? 'Brutamontes!' : 'Ladrão!', COR.sangue);
 }
 
 function levantar(c) {
   const z = CFG.zumbi[c.corpo.especie];
   c.levantou = true; c.fechada = false; c.fechar = 0; c.enfeite = null;
-  inimigos.push({ id: ++idInimigo, tipo: 'zumbi', especie: c.corpo.especie, x: c.x, y: c.y, r: z.r, vida: z.vida, vel: z.vel, dano: z.dano, cova: c, cd: .8, flash: 0, dir: 0 });
+  inimigos.push({ id: ++idInimigo, tipo: 'zumbi', especie: c.corpo.especie, x: c.x, y: c.y, r: z.r, vida: z.vida, vidaMax: z.vida, vel: z.vel, dano: z.dano, defesa: CFG.defesa(dia), cura: CFG.cura(dia), cova: c, cd: .8, flash: 0, dir: 0 });
   flutua(c.x, c.y - 44, `${c.corpo.nome} levantou!`, COR.sangue);
   tremer(.2);
 }
@@ -755,12 +849,12 @@ function andarAte(e, tx, ty, passo) {
 }
 
 function saida(e) {
-  const op = [{ x: W + 30, y: e.y }, { x: e.x, y: H + 30 }, { x: e.x, y: -30 }];
+  const op = [{ x: mundoW + 30, y: e.y }, { x: e.x, y: H + 30 }, { x: e.x, y: -30 }];
   return op.reduce((m, o) => dist(o, e) < dist(m, e) ? o : m);
 }
 
 function roubar(e) {
-  const c = e.alvo, v = Math.min(dinheiro, CFG.roubo(dia));
+  const c = e.alvo, v = Math.min(dinheiro, Math.round(CFG.roubo(dia) * (CFG.ladrao[e.especie] || CFG.ladrao.comum).roubo));
   dinheiro -= v; e.saque = v; stats.roubado += v;
   c.fechada = false; c.fechar = 0; c.enfeite = null;
   flutua(c.x, c.y - 44, v > 0 ? `-$${v}` : 'Revirou a cova', COR.sangue);
@@ -772,6 +866,8 @@ function atualizarInimigos(dt) {
   for (const e of inimigos) {
     if (e.remover) continue;
     e.cd = Math.max(0, e.cd - dt); e.flash = Math.max(0, e.flash - dt);
+    if (e.cura && e.vida < e.vidaMax) e.vida = Math.min(e.vidaMax, e.vida + e.cura * dt);
+    if (e.tipo === 'chefe') { atualizarChefe(e, dt); continue; }
     if (e.tipo === 'zumbi') {
       const q = coveiroMaisPerto(e);
       if (!q) continue;
@@ -792,20 +888,219 @@ function atualizarInimigos(dt) {
     }
     if (e.estado !== 'fugindo' && e.cd <= 0) {
       const q = jogadores.find(o => !o.caido && dist(o, e) < e.r + o.r + 6);
-      if (q) { e.cd = 1.4; ferir(q, 1, e); }
+      if (q) { e.cd = 1.4; ferir(q, e.dano || 1, e); }
     }
   }
   for (let i = 0; i < inimigos.length; i++) for (let j = i + 1; j < inimigos.length; j++) {
     const a = inimigos[i], b = inimigos[j];
     const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1, m = a.r + b.r;
-    if (d < m) { const k = (m - d) / 2; a.x -= dx / d * k; a.y -= dy / d * k; b.x += dx / d * k; b.y += dy / d * k; }
+    if (d >= m) continue;
+    // O chefe não é empurrado: quem sai da frente é o outro
+    const ka = a.tipo === 'chefe' ? 0 : b.tipo === 'chefe' ? 1 : .5, k = m - d;
+    a.x -= dx / d * k * ka; a.y -= dy / d * k * ka; b.x += dx / d * k * (1 - ka); b.y += dy / d * k * (1 - ka);
   }
   inimigos = inimigos.filter(e => !e.remover);
 }
 
+// ===== Chefão: anda atrás do coveiro mais perto e alterna ataques que avisam antes =====
+function novoChefe() {
+  const cf = CFG.chefe, q = coveiroMaisPerto({ x: mundoW / 2, y: H / 2 }) || p;
+  const vida = Math.round(cf.vida * (0.6 + 0.4 * jogadores.length));
+  const x = Math.max(260, Math.min(mundoW - 60, q.x + rnd(-140, 140)));
+  inimigos.push({
+    id: ++idInimigo, tipo: 'chefe', especie: '', x, y: 6, r: cf.r, vida, vidaMax: vida, vel: cf.vel, peso: 0,
+    defesa: CFG.defesa(dia), cura: CFG.cura(dia) / 2, estado: 'andando', prog: 0, saque: 0, cd: 2.5, cdGolpe: 0, flash: 0, dir: Math.PI / 2, ultimo: '',
+  });
+  aviso('O chefe dos ladrões pulou o muro!'); tremer(.5);
+  flutua(x, 70, 'Chefão!', COR.sangue);
+}
+
+function atualizarChefe(e, dt) {
+  const cf = CFG.chefe, q = coveiroMaisPerto(e);
+  e.cdGolpe = Math.max(0, e.cdGolpe - dt);
+  if (!q) return;
+  const mirar = () => { e.dir = Math.atan2(q.y - e.y, q.x - e.x); };
+  if (e.estado === 'andando') {
+    const d = dist(e, q);
+    if (d > e.r + q.r + 8) andarAte(e, q.x, q.y, e.vel * dt); else mirar();
+    if (d < e.r + q.r + cf.golpe.alcance && e.cdGolpe <= 0) { e.estado = 'golpe'; e.prog = 0; mirar(); }
+    else if (e.cd <= 0) comecarAtaque(e, q);
+  } else if (e.estado === 'golpe') {
+    e.prog += dt / cf.golpe.preparo;
+    if (e.prog < 1) return;
+    e.estado = 'andando'; e.cdGolpe = 1.3;
+    jogadores.forEach(o => {
+      if (o.caido || o.inv > 0 || dist(o, e) > e.r + o.r + cf.golpe.alcance) return;
+      ferir(o, cf.golpe.dano, e);
+      const v = Math.min(dinheiro, cf.roubo);
+      if (v > 0) { dinheiro -= v; e.saque += v; stats.roubado += v; flutua(o.x, o.y - 52, `-$${v}`, COR.sangue); }
+    });
+    tremer(.12);
+  } else if (e.estado === 'mirando') {
+    e.prog += dt / cf.investida.mira;
+    if (e.prog >= 1) { e.estado = 'investindo'; e.resta = cf.investida.alcance; e.acertou = []; }
+  } else if (e.estado === 'investindo') {
+    const passo = Math.min(e.resta, cf.investida.vel * dt);
+    e.x += Math.cos(e.dir) * passo; e.y += Math.sin(e.dir) * passo; e.resta -= passo;
+    const bateu = e.x < e.r || e.x > mundoW - e.r || e.y < 40 + e.r || e.y > H - e.r;
+    e.x = Math.max(e.r, Math.min(mundoW - e.r, e.x)); e.y = Math.max(40 + e.r, Math.min(H - e.r, e.y));
+    jogadores.forEach(o => {
+      if (o.caido || e.acertou.includes(o.id) || dist(o, e) > e.r + o.r) return;
+      e.acertou.push(o.id); ferir(o, cf.investida.dano, e);
+    });
+    if (e.resta <= 0 || bateu) { e.estado = 'tonto'; e.prog = 0; if (bateu) tremer(.2); }
+  } else if (e.estado === 'tonto') {
+    e.prog += dt / cf.investida.tonto;
+    if (e.prog >= 1) { e.estado = 'andando'; e.prog = 0; }
+  } else if (e.estado === 'arremessando') {
+    e.prog += dt / .45;
+    if (e.prog < 1) return;
+    e.estado = 'andando'; e.prog = 0;
+    arremessar(e, e.jogar, q);
+  }
+}
+
+function comecarAtaque(e, q) {
+  const cf = CFG.chefe, a = escolha(['bombas', 'investida', 'estrepes'].filter(x => x !== e.ultimo));
+  e.ultimo = a; e.prog = 0;
+  e.cd = rnd(cf.intervalo[0], cf.intervalo[1]);
+  if (a === 'investida') { e.estado = 'mirando'; e.dir = Math.atan2(q.y - e.y, q.x - e.x); e.cd += cf.investida.mira + cf.investida.tonto; }
+  else { e.estado = 'arremessando'; e.jogar = a; }
+}
+
+function arremessar(e, a, q) {
+  const cf = CFG.chefe, ox = e.x, oy = e.y - e.r;
+  if (a === 'bombas') {
+    const n = cf.bombas.n + Math.max(0, jogadores.length - 1);
+    for (let i = 0; i < n; i++) {
+      const alvo = i === 0 ? q : escolha(jogadores.filter(o => !o.caido)) || q;
+      const ang = rnd(0, TAU), d = i === 0 ? 0 : rnd(50, 95);
+      perigos.push({ tipo: 'bomba', ox, oy, x: prenderX(alvo.x + Math.cos(ang) * d), y: prenderY(alvo.y + Math.sin(ang) * d), t: -i * .12, dur: cf.bombas.voo });
+    }
+  } else {
+    for (let i = 0; i < cf.estrepes.n; i++) {
+      const ang = rnd(0, TAU), d = rnd(30, 150);
+      perigos.push({ tipo: 'estrepe', ox, oy, x: prenderX(q.x + Math.cos(ang) * d), y: prenderY(q.y + Math.sin(ang) * d), t: -i * .05, dur: cf.estrepes.voo + cf.estrepes.dura });
+    }
+  }
+}
+const prenderX = x => Math.max(20, Math.min(mundoW - 20, x));
+const prenderY = y => Math.max(56, Math.min(H - 16, y));
+
+function atualizarPerigos(dt) {
+  const cf = CFG.chefe;
+  perigos.forEach(h => {
+    h.t += dt;
+    if (h.tipo === 'bomba') {
+      if (h.t < h.dur) return;
+      h.fim = true;
+      efeito('explosao', h.x, h.y); tremer(.15);
+      jogadores.forEach(o => { if (!o.caido && Math.hypot(o.x - h.x, o.y - h.y) < cf.bombas.raio + o.r * .5) ferir(o, cf.bombas.dano, h); });
+    } else {
+      if (h.t >= h.dur) { h.fim = true; return; }
+      if (h.t < cf.estrepes.voo) return;
+      const o = jogadores.find(q => !q.caido && q.inv <= 0 && Math.hypot(q.x - h.x, q.y - h.y) < q.r + 6);
+      if (o) { h.fim = true; ferir(o, cf.estrepes.dano, h); }
+    }
+  });
+  perigos = perigos.filter(h => !h.fim);
+}
+
+// ===== Eventos do dia =====
+// Cada evento tem um aviso, um começo e um passo que devolve true quando acaba.
+// Para criar outro, some uma entrada aqui e os números dele em CFG.eventos.
+const EVENTOS = {
+  vento: {
+    aviso: 'O vento está ficando forte...',
+    comecar(ev) { ev.frente = -80; ev.feitas = new Set(); aviso('Ventania! Segura o chapéu.'); },
+    // Uma frente de vento atravessa o cemitério da esquerda para a direita: leva as rosas e apaga as velas por onde passa
+    passo(ev, dt) {
+      const cf = CFG.eventos.vento;
+      ev.frente += cf.velocidade * dt;
+      covas.forEach((c, i) => {
+        if (c.x > ev.frente || ev.feitas.has(i)) return;
+        ev.feitas.add(i);
+        if (!dono[c.area] || !c.corpo || Math.random() > cf.pegaCova) return;
+        if (c.enfeite === 'rosa') { c.enfeite = null; efeito('rosa', c.x, c.y + c.h / 2 - 14); }
+        else if (c.enfeite === 'vela') { c.enfeite = 'apagada'; efeito('fumaca', c.x, c.y + c.h / 2 - 22); }
+      });
+      return ev.frente > mundoW + 200;
+    },
+  },
+};
+
+function sortearEvento() {
+  evento = null;
+  const tipos = Object.keys(EVENTOS).filter(k => dia >= CFG.eventos[k].desdeDia && Math.random() < CFG.eventos[k].chance);
+  eventoHoje = tipos.length ? { tipo: escolha(tipos), em: rnd(.3, .65) * CFG.duracaoDia } : null;
+}
+
+function atualizarEvento(dt) {
+  if (eventoHoje && CFG.duracaoDia - relogio >= eventoHoje.em) {
+    evento = { tipo: eventoHoje.tipo, etapa: 'aviso', t: 0, frente: -80 }; eventoHoje = null;
+    aviso(EVENTOS[evento.tipo].aviso);
+  }
+  if (!evento) return;
+  evento.t += dt;
+  if (evento.etapa === 'aviso') {
+    if (evento.t >= CFG.eventos[evento.tipo].aviso) { evento.etapa = 'ativo'; evento.t = 0; EVENTOS[evento.tipo].comecar(evento); }
+  } else if (EVENTOS[evento.tipo].passo(evento, dt)) evento = null;
+}
+
+// ===== Efeitos (só visuais; o anfitrião repassa aos convidados) =====
+function efeito(tipo, x, y) {
+  efeitoLocal(tipo, x, y);
+  if (modo === 'anfitriao') eventos.push({ fx: [tipo, Math.round(x), Math.round(y)] });
+}
+function efeitoLocal(tipo, x, y) {
+  const s = (o) => soltas.push(Object.assign({ x, y, vx: 0, vy: 0, rot: 0, vr: 0, t: 0, vida: 1 }, o));
+  if (tipo === 'rosa') {
+    s({ tipo: 'rosa', vx: rnd(240, 340), vy: rnd(-90, -40), vr: rnd(5, 9), vida: 2.4 });
+    for (let i = 0; i < 5; i++) s({ tipo: 'petala', x: x + rnd(-5, 5), y: y + rnd(-5, 5), vx: rnd(150, 330), vy: rnd(-70, 30), rot: rnd(0, TAU), vr: rnd(-9, 9), vida: rnd(1.3, 2.2) });
+  } else if (tipo === 'fumaca') {
+    for (let i = 0; i < 3; i++) s({ tipo: 'fumaca', x: x + rnd(-2, 2), y: y - i * 4, vx: rnd(50, 90), vy: rnd(-32, -18), t: -i * .08, vida: 1.3 });
+  } else if (tipo === 'explosao') {
+    s({ tipo: 'clarao', vida: .35 });
+    for (let i = 0; i < 6; i++) { const a = rnd(0, TAU), v = rnd(30, 70); s({ tipo: 'fumaca', x: x + Math.cos(a) * 10, y: y + Math.sin(a) * 10, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 20, t: -rnd(0, .1), vida: rnd(.8, 1.2) }); }
+  }
+}
+
+function atualizarSoltas(dt) {
+  const alvo = evento && evento.tipo === 'vento' ? (evento.etapa === 'ativo' ? 1 : .4) : 0;
+  ventoVis += (alvo - ventoVis) * Math.min(1, dt * 1.5);
+  soltas.forEach(s => {
+    s.t += dt;
+    if (s.t < 0) return;
+    s.x += s.vx * dt; s.y += s.vy * dt; s.rot += s.vr * dt;
+    if (s.tipo === 'rosa' || s.tipo === 'petala') s.y += Math.sin(s.t * 7 + s.rot) * 14 * dt;
+  });
+  soltas = soltas.filter(s => s.t < s.vida);
+  // Rajadas e folhas ficam na tela, não no mundo
+  const taxa = ventoVis * (reduzMov ? 8 : 36) * dt;
+  for (let k = taxa; k > 0; k--) {
+    if (Math.random() > k) break;
+    rajadas.push({ x: rnd(-120, W), y: rnd(44, H - 10), len: rnd(40, 130), v: rnd(700, 1000), t: 0, a: rnd(.18, .38), fase: rnd(0, TAU) });
+    if (Math.random() < .35) folhas.push({ x: -10, y: rnd(50, H - 10), vx: rnd(380, 600), vy: rnd(-40, 40), rot: rnd(0, TAU), vr: rnd(-10, 10), cor: escolha(['#b07a35', '#8a6a2a', '#c9a24a', '#7d5a2c']) });
+  }
+  if (evento && evento.tipo === 'vento' && evento.etapa === 'ativo' && !reduzMov) {
+    const fx = evento.frente - camX;
+    if (fx > -60 && fx < W + 60 && Math.random() < dt * 40) rajadas.push({ x: fx + rnd(-40, 20), y: rnd(44, H - 10), len: rnd(90, 180), v: rnd(900, 1100), t: 0, a: rnd(.35, .55), fase: rnd(0, TAU) });
+  }
+  rajadas.forEach(r => { r.x += r.v * dt; r.t += dt; });
+  rajadas = rajadas.filter(r => r.x - r.len < W + 20);
+  folhas.forEach(f => { f.x += f.vx * dt; f.y += f.vy * dt + Math.sin(f.rot) * 30 * dt; f.rot += f.vr * dt; });
+  folhas = folhas.filter(f => f.x < W + 20);
+}
+
+function atualizarCamera(dt) {
+  const alvo = Math.max(0, Math.min(mundoW - W, p.x - W / 2));
+  camX += (alvo - camX) * Math.min(1, dt * 6);
+  if (Math.abs(alvo - camX) < .3) camX = alvo;
+}
+
 // ===== Atualização =====
 function prender(q) {
-  q.x = Math.max(q.r, Math.min(W - q.r, q.x));
+  q.x = Math.max(q.r, Math.min(mundoW - q.r, q.x));
   q.y = Math.max(46, Math.min(H - q.r, q.y));
 }
 
@@ -822,7 +1117,7 @@ function mover(dt) {
   if (!p.andando) return;
   if (m > 1) { dx /= m; dy /= m; }
   const pesado = p.carrega && p.carrega.tipo === 'corpo' && p.carrega.corpo.especie === 'ogro';
-  const vel = CFG.velocidade * (pesado ? 0.7 : 1);
+  const vel = CFG.velocidade * bota().vel * (pesado ? 0.7 : 1);
   p.x += dx * vel * dt; p.y += dy * vel * dt;
   p.dir = Math.atan2(dy, dx);
   prender(p);
@@ -837,19 +1132,26 @@ function atualizar(dt) {
   escuro += (alvoEscuro - escuro) * Math.min(1, dt * 2);
   flutuantes.forEach(f => { f.t += dt; f.y -= 22 * dt; });
   flutuantes = flutuantes.filter(f => f.t < 1.4);
+  atualizarSoltas(dt);
 
   if (modo === 'convidado') {
-    if (estado === 'dia' || estado === 'noite') { relogio = Math.max(0, relogio - dt); mover(dt); }
+    if (estado === 'dia' || estado === 'noite') {
+      relogio = Math.max(0, relogio - dt); mover(dt);
+      moedas.forEach(m => { m.t += dt; }); perigos.forEach(h => { h.t += dt; });
+    }
     suavizar(dt);
+    atualizarCamera(dt);
     enviarEntrada(false);
     return;
   }
+  atualizarCamera(dt);
   if (estado !== 'dia' && estado !== 'noite') return;
 
   relogio -= dt;
   jogadores.forEach(q => { q.inv = Math.max(0, q.inv - dt); q.cdAtaque = Math.max(0, q.cdAtaque - dt); q.golpe = Math.max(0, q.golpe - dt); });
   mover(dt);
   jogadores.forEach(q => segurar(q, dt, q === p ? segurando() : q.segurando));
+  atualizarMoedas(dt);
 
   if (estado === 'dia') {
     tChegada += dt;
@@ -857,12 +1159,14 @@ function atualizar(dt) {
       tChegada = 0;
       if (chegar()) flutua(96, 96, 'Chegou mais um', COR.osso);
     }
+    atualizarEvento(dt);
     if (relogio <= 0) anoitecer();
     return;
   }
 
   tNoite += dt;
   while (agenda.length && agenda[0] <= tNoite) { agenda.shift(); novoLadrao(); }
+  if (tChefe != null && tNoite >= tChefe) { tChefe = null; novoChefe(); }
   covas.forEach(c => {
     if (c.levantarEm == null) return;
     c.levantarEm -= dt;
@@ -870,7 +1174,9 @@ function atualizar(dt) {
   });
   atualizarInimigos(dt);
   if (estado !== 'noite') return;
-  const limpa = !agenda.length && !inimigos.length && !covas.some(c => c.levantarEm != null);
+  atualizarPerigos(dt);
+  if (estado !== 'noite') return;
+  const limpa = !agenda.length && tChefe == null && !inimigos.length && !covas.some(c => c.levantarEm != null);
   if (limpa && tLimpa === 0) aviso('Cemitério limpo. Já vai amanhecer.');
   tLimpa = limpa ? tLimpa + dt : 0;
   if (tLimpa >= 1.5 || relogio <= 0) amanhecer();
@@ -980,7 +1286,7 @@ function receberDoConvidado(id, d) {
   if (Number.isInteger(d.l) && d.l > q.lampSeq) { q.lampSeq = d.l; colocarLampiao(q); }
   if (Array.isArray(d.c) && Number.isInteger(d.c[0]) && d.c[0] > q.compraSeq) {
     q.compraSeq = d.c[0];
-    if (estado === 'loja' && (d.c[1] === 'ferramenta' || d.c[1] === 'lampiao')) comprar(d.c[1]);
+    if (estado === 'loja' && ['ferramenta', 'bota', 'lampiao'].includes(d.c[1])) comprar(d.c[1]);
   }
 }
 
@@ -988,11 +1294,14 @@ const r2 = v => Math.round(v * 100) / 100;
 function fotoMundo() {
   return {
     t: 'mundo', estado: estado === 'pausa' ? estadoPausado : estado, dia, dinheiro, meta, relogio: Math.round(relogio * 10) / 10,
-    nivelFerr, dono, estoque, tipoFim, stats, codigo: codigoSala, fila, lampioes,
+    nivelFerr, nivelBota, dono, estoque, tipoFim, stats, codigo: codigoSala, fila, lampioes,
+    evento: evento ? [evento.tipo, evento.etapa, Math.round(evento.frente || 0)] : null,
+    moedas: moedas.map(m => [m.id, Math.round(m.x), Math.round(m.y), Math.round(m.ox), Math.round(m.oy), r2(m.t)]),
+    perigos: perigos.map(h => [h.tipo, Math.round(h.x), Math.round(h.y), Math.round(h.ox), Math.round(h.oy), r2(h.t), r2(h.dur)]),
     covas: covas.map(c => (c.prof || c.corpo)
       ? [r2(c.prof), c.corpo, c.fechada ? 1 : 0, r2(c.fechar), c.enfeite, c.levantou ? 1 : 0, c.levantarEm != null && c.levantarEm < 2.2 ? 1 : 0, c.pago ? 1 : 0]
       : 0),
-    inimigos: inimigos.filter(e => !e.remover).map(e => [e.id, e.tipo, e.especie || '', Math.round(e.x), Math.round(e.y), e.r, e.vida, e.estado || '', r2(e.prog || 0), e.saque || 0, r2(e.dir), e.flash > 0 ? 1 : 0]),
+    inimigos: inimigos.filter(e => !e.remover).map(e => [e.id, e.tipo, e.especie || '', Math.round(e.x), Math.round(e.y), e.r, r2(e.vida), e.estado || '', r2(e.prog || 0), e.saque || 0, r2(e.dir), e.flash > 0 ? 1 : 0, r2(e.vidaMax || e.vida)]),
     jogadores: jogadores.map(q => [q.id, q.nome, q.cor, Math.round(q.x), Math.round(q.y), r2(q.dir), q.carrega, q.vida, q.caido ? 1 : 0, q.golpe > 0 ? 1 : 0, q.trabalhando ? 1 : 0, q.andando ? 1 : 0, q.inv > 0 ? 1 : 0]),
     ev: eventos,
   };
@@ -1053,8 +1362,12 @@ function enviarEntrada(ja) {
 function aplicarMundo(m) {
   const antes = estado;
   estado = m.estado; dia = m.dia; dinheiro = m.dinheiro; meta = m.meta; relogio = m.relogio;
-  nivelFerr = m.nivelFerr; dono = m.dono; estoque = m.estoque; tipoFim = m.tipoFim; stats = m.stats; codigoSala = m.codigo;
+  nivelFerr = m.nivelFerr; nivelBota = m.nivelBota || 0; estoque = m.estoque; tipoFim = m.tipoFim; stats = m.stats; codigoSala = m.codigo;
   fila = m.fila; lampioes = m.lampioes;
+  dono = m.dono.slice(); ajustarAreas(dono.length);
+  evento = m.evento ? { tipo: m.evento[0], etapa: m.evento[1], frente: m.evento[2] } : null;
+  moedas = (m.moedas || []).map(v => ({ id: v[0], x: v[1], y: v[2], ox: v[3], oy: v[4], t: v[5] }));
+  perigos = (m.perigos || []).map(v => ({ tipo: v[0], x: v[1], y: v[2], ox: v[3], oy: v[4], t: v[5], dur: v[6] }));
   m.covas.forEach((v, i) => {
     const c = covas[i];
     if (!c) return;
@@ -1064,7 +1377,7 @@ function aplicarMundo(m) {
   const velhos = new Map(inimigos.map(e => [e.id, e]));
   inimigos = m.inimigos.map(v => {
     const e = velhos.get(v[0]) || { x: v[3], y: v[4] };
-    return Object.assign(e, { id: v[0], tipo: v[1], especie: v[2], alvoX: v[3], alvoY: v[4], r: v[5], vida: v[6], estado: v[7], prog: v[8], saque: v[9], dir: v[10], flash: v[11] ? .1 : 0 });
+    return Object.assign(e, { id: v[0], tipo: v[1], especie: v[2], alvoX: v[3], alvoY: v[4], r: v[5], vida: v[6], estado: v[7], prog: v[8], saque: v[9], dir: v[10], flash: v[11] ? .1 : 0, vidaMax: v[12] || v[6] });
   });
   const velhosJ = new Map(jogadores.map(q => [q.id, q]));
   const comecou = (antes === 'sala' || antes === 'fim') && estado === 'dia';
@@ -1081,11 +1394,12 @@ function aplicarMundo(m) {
     if (ev.para && ev.para !== p.id) return;
     if (ev.exceto && ev.exceto === p.id) return;
     if (ev.f) flutuantes.push({ x: ev.f[0], y: ev.f[1], txt: String(ev.f[2]), cor: corSegura(ev.f[3]), t: 0 });
+    if (ev.fx && ['rosa', 'fumaca', 'explosao'].includes(ev.fx[0])) efeitoLocal(ev.fx[0], +ev.fx[1] || 0, +ev.fx[2] || 0);
     if (ev.a) avisoLocal(String(ev.a));
     if (ev.tr && !reduzMov) tremor = Math.max(tremor, +ev.tr || 0);
   });
   if (antes !== estado && (antes === 'dia' || antes === 'noite')) soltar();
-  const sig = [estado, dia, dinheiro, nivelFerr, estoque, tipoFim, stats.ganho, stats.roubado, stats.recuperado, jogadores.map(q => q.nome + q.cor).join(',')].join('|');
+  const sig = [estado, dia, dinheiro, nivelFerr, nivelBota, estoque, tipoFim, stats.ganho, stats.roubado, stats.recuperado, jogadores.map(q => q.nome + q.cor).join(',')].join('|');
   if (sig === assinatura) return;
   assinatura = sig;
   if (estado === 'dia' || estado === 'noite') { if (!$('#painel').hidden) esconderPainel(); }
@@ -1135,48 +1449,63 @@ function texto(s, x, y, tam, cor, peso = 600) {
   ctx.fillStyle = cor; ctx.fillText(s, x, y);
 }
 
-function assarChao() {
-  const c = document.createElement('canvas'); c.width = W * 2; c.height = H * 2;
-  const g = c.getContext('2d'); g.scale(2, 2);
-  const rng = mulberry(11);
-  g.fillStyle = '#5b7a42'; g.fillRect(0, 0, W, H);
-  for (let i = 0; i < 240; i++) {
+// O chão é assado em pedaços de 480 px, sob demanda, para o mundo crescer sem limite.
+// Cada pedaço desenha também as manchas dos vizinhos, para não ficar emenda.
+const PEDACO = 480, pedacos = new Map();
+function detalhesChao(g, j) {
+  const rng = mulberry(11 + j * 7919), x0 = j * PEDACO;
+  for (let i = 0; i < 120; i++) {
     g.fillStyle = rng() < .5 ? 'rgba(138,168,92,.16)' : 'rgba(36,58,28,.16)';
-    g.beginPath(); g.ellipse(rng() * W, rng() * H, 12 + rng() * 44, 8 + rng() * 26, rng() * 3, 0, TAU); g.fill();
+    g.beginPath(); g.ellipse(x0 + rng() * PEDACO, rng() * H, 12 + rng() * 44, 8 + rng() * 26, rng() * 3, 0, TAU); g.fill();
   }
-  g.fillStyle = 'rgba(139,106,70,.78)';
-  g.fillRect(170, 34, 30, H - 34);
-  g.fillRect(170, 204, W - 170, 22);
-  g.fillRect(170, 354, W - 170, 22);
   g.fillStyle = 'rgba(60,42,26,.35)';
-  for (let i = 0; i < 170; i++) {
-    const vertical = rng() < .3;
-    const x = vertical ? 170 + rng() * 30 : 170 + rng() * (W - 170);
+  for (let i = 0; i < 90; i++) {
+    const vertical = j === 0 && rng() < .55;
+    const x = vertical ? 170 + rng() * 30 : Math.max(170, x0) + rng() * (x0 + PEDACO - Math.max(170, x0));
     const y = vertical ? 34 + rng() * (H - 34) : (rng() < .5 ? 204 : 354) + rng() * 22;
     g.beginPath(); g.arc(x, y, .8 + rng() * 1.6, 0, TAU); g.fill();
   }
   g.strokeStyle = 'rgba(32,52,26,.55)'; g.lineWidth = 1.3; g.lineCap = 'round';
-  for (let i = 0; i < 380; i++) {
-    const x = rng() * W, y = 42 + rng() * (H - 42);
+  for (let i = 0; i < 190; i++) {
+    const x = x0 + rng() * PEDACO, y = 42 + rng() * (H - 42);
     if (x > 164 && x < 206) continue;
     if (x > 164 && ((y > 198 && y < 232) || (y > 348 && y < 382))) continue;
     g.beginPath(); g.moveTo(x - 3, y - 4); g.lineTo(x, y); g.lineTo(x + 3, y - 5); g.moveTo(x, y); g.lineTo(x, y - 6); g.stroke();
   }
-  g.fillStyle = '#4a4453'; g.fillRect(0, 0, W, 34);
+}
+function pedacoChao(k) {
+  let c = pedacos.get(k);
+  if (c) return c;
+  if (pedacos.size > 8) pedacos.delete(pedacos.keys().next().value);
+  const x0 = k * PEDACO, larg = PEDACO + 2;
+  c = document.createElement('canvas'); c.width = larg * 2; c.height = H * 2;
+  const g = c.getContext('2d'); g.scale(2, 2); g.translate(-x0, 0);
+  g.fillStyle = '#5b7a42'; g.fillRect(x0, 0, larg, H);
+  g.fillStyle = 'rgba(139,106,70,.78)';
+  if (k === 0) g.fillRect(170, 34, 30, H - 34);
+  const px = Math.max(170, x0);
+  if (px < x0 + larg) { g.fillRect(px, 204, x0 + larg - px, 22); g.fillRect(px, 354, x0 + larg - px, 22); }
+  for (let j = k - 1; j <= k + 1; j++) if (j >= 0) detalhesChao(g, j);
+  g.fillStyle = '#4a4453'; g.fillRect(x0, 0, larg, 34);
   g.strokeStyle = 'rgba(22,19,28,.55)'; g.lineWidth = 1.5;
-  for (let row = 0; row < 2; row++) for (let x = row ? -18 : 0; x < W; x += 36) g.strokeRect(x + .5, row * 15 + 2.5, 36, 15);
-  g.fillStyle = '#3a3542'; g.fillRect(0, 32, W, 4);
-  g.fillStyle = '#2a2531'; g.fillRect(58, 0, 76, 36);
-  g.strokeStyle = '#16131c'; g.lineWidth = 2;
-  for (let x = 62; x < 134; x += 8) { g.beginPath(); g.moveTo(x, 2); g.lineTo(x, 36); g.stroke(); }
+  for (let row = 0; row < 2; row++) for (let x = Math.floor(x0 / 36) * 36 - (row ? 18 : 0); x < x0 + larg; x += 36) g.strokeRect(x + .5, row * 15 + 2.5, 36, 15);
+  g.fillStyle = '#3a3542'; g.fillRect(x0, 32, larg, 4);
+  if (k === 0) {
+    g.fillStyle = '#2a2531'; g.fillRect(58, 0, 76, 36);
+    g.strokeStyle = '#16131c'; g.lineWidth = 2;
+    for (let x = 62; x < 134; x += 8) { g.beginPath(); g.moveTo(x, 2); g.lineTo(x, 36); g.stroke(); }
+  }
+  pedacos.set(k, c);
   return c;
 }
-const chao = assarChao();
 const luz = document.createElement('canvas'); luz.width = W; luz.height = H;
 const lg = luz.getContext('2d');
 
+const naTela = (x, m = 80) => x > camDesenho - m && x < camDesenho + W + m;
+
 function desenharAreas() {
   AREAS.forEach((a, i) => {
+    if (!naTela(a.x + a.w / 2, a.w)) return;
     if (dono[i]) { rr(a.x, a.y, a.w, a.h, 12); ctx.strokeStyle = 'rgba(22,19,28,.2)'; ctx.lineWidth = 2; ctx.stroke(); return; }
     rr(a.x, a.y, a.w, a.h, 12); ctx.fillStyle = 'rgba(16,13,20,.42)'; ctx.fill();
     ctx.setLineDash([10, 8]); rr(a.x + 4, a.y + 4, a.w - 8, a.h - 8, 10);
@@ -1185,7 +1514,7 @@ function desenharAreas() {
     ctx.fillStyle = COR.tinta; ctx.fillRect(cx - 3, cy + 10, 6, 34);
     rr(cx - 52, cy - 30, 104, 48, 6); ctx.fillStyle = COR.madeira; ctx.fill(); contorno(2.5);
     texto('À venda', cx, cy - 13, 13, COR.osso, 500);
-    texto(`$${CFG.precoTerreno[i]}`, cx, cy + 6, 19, COR.ambar, 700);
+    texto(`$${CFG.precoTerreno(i)}`, cx, cy + 6, 19, COR.ambar, 700);
   });
 }
 
@@ -1197,11 +1526,21 @@ function desenharRosa(x, y, s = 1) {
   ctx.strokeStyle = '#8e1d27'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(x, y - s, 2.2 * s, .5, 4.5); ctx.stroke();
 }
 
-function desenharVela(x, y, s = 1) {
+function desenharVela(x, y, s = 1, apagada = false) {
   rr(x - 3 * s, y - 5 * s, 6 * s, 12 * s, 1.5 * s); ctx.fillStyle = '#f3ecd9'; ctx.fill(); contorno(1.4);
-  const f = 1 + Math.sin(tempo * 18 + x) * .12;
-  ctx.fillStyle = COR.ambar; ctx.beginPath(); ctx.ellipse(x, y - 9 * s, 2.4 * s, 4 * s * f, 0, 0, TAU); ctx.fill();
-  ctx.fillStyle = '#fff3c4'; ctx.beginPath(); ctx.ellipse(x, y - 8.4 * s, 1 * s, 2 * s * f, 0, 0, TAU); ctx.fill();
+  if (apagada) {
+    ctx.strokeStyle = COR.tinta; ctx.lineWidth = 1.4 * s;
+    ctx.beginPath(); ctx.moveTo(x, y - 5 * s); ctx.lineTo(x + s, y - 8 * s); ctx.stroke();
+    const k = (tempo * .7 + x * .01) % 1;
+    ctx.strokeStyle = `rgba(200,198,210,${.45 * (1 - k)})`; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i <= 6; i++) { const yy = y - 9 * s - i * 2.2 - k * 6; ctx.lineTo(x + Math.sin(i * 1.3 + tempo * 3) * 2, yy); }
+    ctx.stroke();
+    return;
+  }
+  const f = 1 + Math.sin(tempo * 18 + x) * .12, inclina = ventoVis * 2.5 * s;
+  ctx.fillStyle = COR.ambar; ctx.beginPath(); ctx.ellipse(x + inclina, y - 9 * s, 2.4 * s, 4 * s * f, ventoVis * .5, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#fff3c4'; ctx.beginPath(); ctx.ellipse(x + inclina * .8, y - 8.4 * s, 1 * s, 2 * s * f, ventoVis * .5, 0, TAU); ctx.fill();
 }
 
 function desenharCorpo(x, y, especie, ang = 0, s = 1) {
@@ -1257,6 +1596,7 @@ function desenharCova(c) {
     ctx.beginPath(); ctx.moveTo(x, t - 10); ctx.lineTo(x, t + 8); ctx.moveTo(x - 5, t - 4); ctx.lineTo(x + 5, t - 4); ctx.stroke();
     if (c.enfeite === 'rosa') desenharRosa(x, y + c.h / 2 - 14, 1.1);
     else if (c.enfeite === 'vela') desenharVela(x, y + c.h / 2 - 12, 1.1);
+    else if (c.enfeite === 'apagada') desenharVela(x, y + c.h / 2 - 12, 1.1, true);
     return;
   }
   const k = Math.min(1, c.prof);
@@ -1414,27 +1754,193 @@ function desenharZumbi(e) {
   if (e.flash > 0) { circulo(e.x, e.y, r + 2); ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fill(); }
 }
 
+// O ladrão comum tem r 13; o brutamontes é o mesmo desenho maior e de listra vermelha
 function desenharLadrao(e) {
-  const r = e.r;
+  const r = e.r, k = r / 13, bruto = e.especie === 'brutamontes';
   sombra(e.x, e.y + r * .9, r, r * .35);
-  const sacoR = e.saque > 0 ? 9 : 6;
-  const sx = e.x - Math.cos(e.dir) * 12, sy = e.y - Math.sin(e.dir) * 12 - 2;
+  const sacoR = (e.saque > 0 ? 9 : 6) * k;
+  const sx = e.x - Math.cos(e.dir) * 12 * k, sy = e.y - Math.sin(e.dir) * 12 * k - 2;
   circulo(sx, sy, sacoR); ctx.fillStyle = '#9b7a4a'; ctx.fill(); contorno(2);
-  if (e.saque > 0) texto('$', sx, sy + 1, 11, COR.ambar, 700);
+  if (e.saque > 0) texto('$', sx, sy + 1, 11 * k, COR.ambar, 700);
   ctx.save(); circulo(e.x, e.y, r); ctx.clip();
   ctx.fillStyle = '#ece5d3'; ctx.fillRect(e.x - r, e.y - r, 2 * r, 2 * r);
-  ctx.fillStyle = '#1b1820';
-  for (let yy = -r; yy < r; yy += 6) ctx.fillRect(e.x - r, e.y + yy, 2 * r, 3);
+  ctx.fillStyle = bruto ? '#8e2b33' : '#1b1820';
+  for (let yy = -r; yy < r; yy += 6 * k) ctx.fillRect(e.x - r, e.y + yy, 2 * r, 3 * k);
   ctx.restore();
   circulo(e.x, e.y, r); contorno(2.5);
-  const hx = e.x + Math.cos(e.dir) * 2, hy = e.y - 7;
-  circulo(hx, hy, 8); ctx.fillStyle = '#d9b08a'; ctx.fill(); contorno(2);
-  ctx.fillStyle = '#1b1820'; ctx.beginPath(); ctx.arc(hx, hy - 1, 8.4, Math.PI, 0); ctx.fill();
-  rr(hx - 8.5, hy - 1, 17, 5, 2.5); ctx.fillStyle = '#1b1820'; ctx.fill();
+  const hx = e.x + Math.cos(e.dir) * 2 * k, hy = e.y - 7 * k;
+  circulo(hx, hy, 8 * k); ctx.fillStyle = '#d9b08a'; ctx.fill(); contorno(2);
+  ctx.fillStyle = '#1b1820'; ctx.beginPath(); ctx.arc(hx, hy - k, 8.4 * k, Math.PI, 0); ctx.fill();
+  rr(hx - 8.5 * k, hy - k, 17 * k, 5 * k, 2.5 * k); ctx.fillStyle = '#1b1820'; ctx.fill();
   ctx.fillStyle = COR.osso;
-  circulo(hx - 3, hy + 1.5, 1.4); ctx.fill();
-  circulo(hx + 3, hy + 1.5, 1.4); ctx.fill();
+  circulo(hx - 3 * k, hy + 1.5 * k, 1.4 * k); ctx.fill();
+  circulo(hx + 3 * k, hy + 1.5 * k, 1.4 * k); ctx.fill();
+  if (bruto) { ctx.strokeStyle = '#8e2b33'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(hx - 4, hy + 6 * k); ctx.lineTo(hx + 4, hy + 5 * k); ctx.stroke(); }
   if (e.flash > 0) { circulo(e.x, e.y, r + 2); ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fill(); }
+}
+
+// Chefão: ladrão gigante de cartola, bigode e um saco enorme
+function desenharChefe(e) {
+  const r = e.r, k = r / 13;
+  const tremido = e.estado === 'mirando' && !reduzMov ? rnd(-1.5, 1.5) : 0;
+  const x = e.x + tremido, y = e.y;
+  sombra(x, y + r * .9, r * 1.05, r * .36);
+  // saco nas costas; levanta acima da cabeça quando vai arremessar
+  const ergue = e.estado === 'arremessando' ? Math.min(1, e.prog * 1.6) : 0;
+  const sx = x - Math.cos(e.dir) * 14 * (1 - ergue), sy = y - Math.sin(e.dir) * 14 * (1 - ergue) - 4 - ergue * (r + 14);
+  circulo(sx, sy, 16 + Math.min(10, e.saque * .15)); ctx.fillStyle = '#9b7a4a'; ctx.fill(); contorno(2.5);
+  texto('$', sx, sy + 1, 17, COR.ambar, 700);
+  ctx.save(); circulo(x, y, r); ctx.clip();
+  ctx.fillStyle = '#ece5d3'; ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+  ctx.fillStyle = '#1b1820';
+  for (let yy = -r; yy < r; yy += 12) ctx.fillRect(x - r, y + yy, 2 * r, 6);
+  ctx.restore();
+  circulo(x, y, r); contorno(3);
+  const hx = x + Math.cos(e.dir) * 4, hy = y - 7 * k;
+  circulo(hx, hy, 7.5 * k); ctx.fillStyle = '#d9b08a'; ctx.fill(); contorno(2.5);
+  rr(hx - 8 * k, hy - 2 * k, 16 * k, 4.5 * k, 2 * k); ctx.fillStyle = '#1b1820'; ctx.fill();
+  ctx.fillStyle = e.estado === 'mirando' || e.estado === 'golpe' ? COR.sangue : COR.osso;
+  circulo(hx - 3 * k, hy, 1.3 * k); ctx.fill();
+  circulo(hx + 3 * k, hy, 1.3 * k); ctx.fill();
+  // bigode
+  ctx.fillStyle = '#1b1820';
+  [-1, 1].forEach(sg => { ctx.beginPath(); ctx.ellipse(hx + sg * 5, hy + 4 * k, 6, 2.6, sg * .35, 0, TAU); ctx.fill(); });
+  // cartola
+  ctx.beginPath(); ctx.ellipse(hx, hy - 6 * k, 11 * k, 3 * k, 0, 0, TAU); ctx.fillStyle = '#1b1820'; ctx.fill(); contorno(2);
+  rr(hx - 6.5 * k, hy - 17 * k, 13 * k, 11 * k, 2); ctx.fill(); contorno(2);
+  ctx.fillStyle = '#8e2b33'; ctx.fillRect(hx - 6.5 * k, hy - 9 * k, 13 * k, 2.2 * k);
+  if (e.estado === 'tonto') {
+    for (let i = 0; i < 3; i++) {
+      const a = tempo * 4 + i * TAU / 3;
+      texto('*', hx + Math.cos(a) * 20, hy - 18 * k + Math.sin(a) * 6, 20, COR.ambar, 700);
+    }
+  }
+  if (e.flash > 0) { circulo(x, y, r + 2); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.fill(); }
+}
+
+// Avisos dos ataques do chefe e os perigos no chão. Ficam por cima do escuro para dar para ver chegando
+function desenharAvisosChefe() {
+  const cf = CFG.chefe;
+  inimigos.forEach(e => {
+    if (e.tipo !== 'chefe') return;
+    if (e.estado === 'mirando') {
+      const len = cf.investida.alcance + e.r, w = e.r * 2 + 10;
+      ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(e.dir);
+      rr(0, -w / 2, len, w, w / 2); ctx.fillStyle = `rgba(224,82,90,${.12 + .28 * e.prog})`; ctx.fill();
+      ctx.setLineDash([10, 8]); ctx.lineDashOffset = -tempo * 40;
+      ctx.strokeStyle = 'rgba(224,82,90,.9)'; ctx.lineWidth = 2.5; ctx.stroke(); ctx.setLineDash([]);
+      rr(0, -w / 2, len * e.prog, w, w / 2); ctx.fillStyle = 'rgba(224,82,90,.22)'; ctx.fill();
+      ctx.restore();
+    } else if (e.estado === 'golpe') {
+      const alc = e.r + cf.golpe.alcance; // encostou o corpo no vermelho, apanha
+      circulo(e.x, e.y, alc); ctx.fillStyle = `rgba(224,82,90,${.1 + .25 * e.prog})`; ctx.fill();
+      ctx.strokeStyle = 'rgba(224,82,90,.9)'; ctx.lineWidth = 2.5; ctx.stroke();
+    }
+  });
+  perigos.forEach(h => {
+    const k = Math.max(0, Math.min(1, h.t / (h.tipo === 'bomba' ? h.dur : cf.estrepes.voo)));
+    if (h.tipo === 'bomba') {
+      const R = cf.bombas.raio;
+      circulo(h.x, h.y, R); ctx.fillStyle = 'rgba(224,82,90,.14)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(224,82,90,.9)'; ctx.lineWidth = 2.5; ctx.stroke();
+      circulo(h.x, h.y, R * k); ctx.fillStyle = 'rgba(224,82,90,.3)'; ctx.fill();
+      if (h.t < 0) return;
+      const bx = h.ox + (h.x - h.ox) * k, by = h.oy + (h.y - h.oy) * k - Math.sin(Math.PI * k) * 130;
+      circulo(bx, by, 8); ctx.fillStyle = '#1b1820'; ctx.fill(); contorno(2);
+      ctx.strokeStyle = COR.madeira; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx + 4, by - 6); ctx.lineTo(bx + 7, by - 11); ctx.stroke();
+      circulo(bx + 7, by - 12, 2.4 + Math.sin(tempo * 30) * .8); ctx.fillStyle = COR.ambar; ctx.fill();
+    } else if (k < 1) {
+      circulo(h.x, h.y, 10); ctx.strokeStyle = 'rgba(224,82,90,.7)'; ctx.lineWidth = 2; ctx.stroke();
+      if (h.t < 0) return;
+      const bx = h.ox + (h.x - h.ox) * k, by = h.oy + (h.y - h.oy) * k - Math.sin(Math.PI * k) * 80;
+      desenharEstrepe(bx, by, tempo * 12);
+    } else {
+      const some = h.dur - h.t < 1.5 && Math.floor(tempo * 8) % 2;
+      if (!some) desenharEstrepe(h.x, h.y, h.x);
+    }
+  });
+}
+function desenharEstrepe(x, y, giro) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(giro);
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) { const a = i * TAU / 8, R = i % 2 ? 3 : 9; ctx.lineTo(Math.cos(a) * R, Math.sin(a) * R); }
+  ctx.closePath(); ctx.fillStyle = '#b3b0bd'; ctx.fill();
+  ctx.strokeStyle = COR.sangue; ctx.lineWidth = 1.6; ctx.stroke();
+  ctx.restore();
+}
+
+function desenharMoeda(m) {
+  const k = Math.min(1, m.t / MOEDA_VOO);
+  const x = m.ox + (m.x - m.ox) * k, y = m.oy + (m.y - m.oy) * k - Math.sin(Math.PI * k) * 26;
+  const gira = Math.abs(Math.cos(tempo * 3 + m.id));
+  if (k >= 1) sombra(m.x, m.y + 5, 6, 2);
+  ctx.beginPath(); ctx.ellipse(x, y, 6 * (.35 + .65 * gira), 6, 0, 0, TAU);
+  ctx.fillStyle = COR.ambar; ctx.fill(); contorno(1.8);
+  if (gira > .6) { ctx.fillStyle = '#fff3c4'; ctx.fillRect(x - 1, y - 3, 2, 6); }
+}
+
+function desenharSoltas() {
+  soltas.forEach(s => {
+    if (s.t < 0) return;
+    const a = 1 - Math.max(0, (s.t - (s.vida - .5)) / .5);
+    ctx.save(); ctx.globalAlpha = Math.max(0, a);
+    if (s.tipo === 'rosa') { ctx.translate(s.x, s.y); ctx.rotate(s.rot); desenharRosa(0, 0, 1.1); }
+    else if (s.tipo === 'petala') { ctx.translate(s.x, s.y); ctx.rotate(s.rot); ctx.beginPath(); ctx.ellipse(0, 0, 3.2, 1.8, 0, 0, TAU); ctx.fillStyle = '#c8323c'; ctx.fill(); }
+    else if (s.tipo === 'fumaca') {
+      ctx.globalAlpha = Math.max(0, .5 * (1 - s.t / s.vida));
+      circulo(s.x, s.y, 4 + s.t * 10); ctx.fillStyle = '#cfccd8'; ctx.fill();
+    } else if (s.tipo === 'clarao') {
+      const k = s.t / s.vida;
+      circulo(s.x, s.y, 20 + k * 40); ctx.fillStyle = `rgba(242,181,68,${.8 * (1 - k)})`; ctx.fill();
+      circulo(s.x, s.y, 10 + k * 22); ctx.fillStyle = `rgba(255,243,196,${1 - k})`; ctx.fill();
+    }
+    ctx.restore();
+  });
+}
+
+// Rajadas e folhas: desenhadas na tela, por cima de tudo
+function desenharVento() {
+  if (!rajadas.length && !folhas.length) return;
+  ctx.lineCap = 'round';
+  rajadas.forEach(r => {
+    const a = r.a * Math.min(1, r.t * 5) * Math.min(1, ventoVis * 1.5);
+    if (a <= .01) return;
+    ctx.strokeStyle = `rgba(239,230,210,${a})`; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(r.x - r.len, r.y);
+    ctx.quadraticCurveTo(r.x - r.len / 2, r.y + Math.sin(r.fase + r.t * 8) * 6, r.x, r.y);
+    ctx.stroke();
+  });
+  folhas.forEach(f => {
+    ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(f.rot);
+    ctx.beginPath(); ctx.ellipse(0, 0, 5, 2.4, 0, 0, TAU); ctx.fillStyle = f.cor; ctx.fill();
+    ctx.restore();
+  });
+}
+
+// Setas na borda da tela para quem está fora dela
+function desenharSetas() {
+  const setas = [];
+  inimigos.forEach(e => setas.push([e.x, e.y, e.tipo === 'chefe' ? 14 : 10, COR.sangue]));
+  if (modo !== 'solo') jogadores.forEach(q => { if (q !== p && !q.caido) setas.push([q.x, q.y, 9, corSegura(q.cor)]); });
+  setas.forEach(([x, y, t, cor]) => {
+    const sx = x - camDesenho;
+    if (sx >= -8 && sx <= W + 8) return;
+    const d = sx < 0 ? -1 : 1, ax = sx < 0 ? 16 : W - 16, ay = Math.max(52, Math.min(H - 16, y));
+    ctx.beginPath(); ctx.moveTo(ax + d * t, ay); ctx.lineTo(ax - d * t * .6, ay - t); ctx.lineTo(ax - d * t * .6, ay + t); ctx.closePath();
+    ctx.fillStyle = cor; ctx.fill(); contorno(2);
+  });
+}
+
+function barraChefe() {
+  const e = inimigos.find(o => o.tipo === 'chefe');
+  if (!e) return;
+  const w = Math.min(420, W - 120), x = (W - w) / 2, y = H - 30;
+  // fica transparente quando o chefe ou o coveiro passam por baixo dela
+  ctx.save(); ctx.globalAlpha = e.y > H - 100 || p.y > H - 70 ? .3 : 1;
+  rr(x - 4, y - 4, w + 8, 16, 8); ctx.fillStyle = 'rgba(22,19,28,.85)'; ctx.fill();
+  rr(x, y, Math.max(0, w * e.vida / e.vidaMax), 8, 4); ctx.fillStyle = COR.sangue; ctx.fill();
+  texto('Chefe dos ladrões', W / 2, y - 14, 14, COR.osso, 600);
+  ctx.restore();
 }
 
 function barra(x, y, frac, cor, marca) {
@@ -1455,16 +1961,19 @@ function furo(x, y, r, forca) {
 function desenharEscuro() {
   if (escuro < .01) return;
   lg.globalCompositeOperation = 'source-over';
+  lg.setTransform(1, 0, 0, 1, 0, 0);
   lg.clearRect(0, 0, W, H);
   lg.fillStyle = `rgba(10,12,34,${escuro})`; lg.fillRect(0, 0, W, H);
   lg.globalCompositeOperation = 'destination-out';
+  lg.setTransform(1, 0, 0, 1, -camDesenho, 0);
   jogadores.forEach(q => furo(q.x, q.y, q.caido ? 60 : 120, q.caido ? .5 : .92));
-  lampioes.forEach(l => furo(l.x, l.y - 12, CFG.raioLampiao + 22, 1));
-  covas.forEach(c => { if (c.fechada && c.enfeite === 'vela') furo(c.x, c.y + c.h / 2 - 20, 42, .8); });
+  lampioes.forEach(l => { if (naTela(l.x, 140)) furo(l.x, l.y - 12, CFG.raioLampiao + 22, 1); });
+  covas.forEach(c => { if (c.fechada && c.enfeite === 'vela' && naTela(c.x)) furo(c.x, c.y + c.h / 2 - 20, 42, .8); });
   furo(ESTANDES[1].x, ESTANDES[1].y - 8, 46, .8);
+  lg.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(luz, 0, 0, W, H);
   if (escuro > .3) {
-    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    ctx.save(); ctx.translate(-camDesenho, 0); ctx.globalCompositeOperation = 'lighter';
     lampioes.forEach(l => {
       const g = ctx.createRadialGradient(l.x, l.y - 34, 0, l.x, l.y - 34, 70);
       g.addColorStop(0, 'rgba(242,181,68,.28)'); g.addColorStop(1, 'rgba(242,181,68,0)');
@@ -1487,34 +1996,46 @@ function desenharAlvo(a) {
 }
 
 function desenhar() {
-  ctx.setTransform(escala * dpr, 0, 0, escala * dpr, 0, 0);
+  const px = escala * dpr;
+  ctx.setTransform(px, 0, 0, px, 0, 0);
   ctx.clearRect(0, 0, W, H);
   if (tremor > 0) ctx.translate(rnd(-1, 1) * tremor * 14, rnd(-1, 1) * tremor * 14);
-  ctx.drawImage(chao, 0, 0, W, H);
+  camDesenho = Math.round(camX * px) / px;
+
+  // Mundo (sob o escuro)
+  ctx.save(); ctx.translate(-camDesenho, 0);
+  for (let k = Math.floor(camDesenho / PEDACO); k * PEDACO < camDesenho + W; k++) ctx.drawImage(pedacoChao(k), k * PEDACO, 0, PEDACO + 2, H);
   desenharAreas();
   if (escuro < .3) lampioes.forEach(l => {
+    if (!naTela(l.x, 120)) return;
     ctx.setLineDash([4, 6]); ctx.strokeStyle = 'rgba(242,181,68,.45)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(l.x, l.y, CFG.raioLampiao, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
   });
-  covas.forEach(c => { if (dono[c.area]) desenharCova(c); });
+  covas.forEach(c => { if (dono[c.area] && naTela(c.x)) desenharCova(c); });
   desenharCarroca();
   fila.forEach((c, i) => { if (c) desenharCorpo(SLOTS[i].x, SLOTS[i].y, c.especie); });
   desenharEstandes();
+  moedas.forEach(desenharMoeda);
   const jogando = estado === 'dia' || estado === 'noite';
   const alvo = jogando && !p.caido ? alvoAtual(p) : null;
   if (alvo) desenharAlvo(alvo);
-  lampioes.forEach(desenharLampiao);
-  const ents = inimigos.map(e => ({ y: e.y, f: () => (e.tipo === 'zumbi' ? desenharZumbi(e) : desenharLadrao(e)) }));
+  lampioes.forEach(l => { if (naTela(l.x)) desenharLampiao(l); });
+  const ents = inimigos.map(e => ({ y: e.y, f: () => (e.tipo === 'zumbi' ? desenharZumbi(e) : e.tipo === 'chefe' ? desenharChefe(e) : desenharLadrao(e)) }));
   jogadores.forEach(q => ents.push({ y: q.y, f: () => desenharCoveiro(q) }));
   ents.sort((a, b) => a.y - b.y).forEach(o => o.f());
+  desenharSoltas();
+  ctx.restore();
 
   desenharEscuro();
 
+  // Por cima do escuro: pedidos, avisos, barras e números
+  ctx.save(); ctx.translate(-camDesenho, 0);
+  desenharAvisosChefe();
   fila.forEach((c, i) => { if (c) balao(SLOTS[i].x + 44, SLOTS[i].y - 4, c.pedido); });
   jogadores.forEach(q => { if (!q.caido && q.carrega && q.carrega.tipo === 'corpo') balao(q.x + 30, q.y - 36, q.carrega.corpo.pedido); });
   if (modo !== 'solo') jogadores.forEach(q => { if (q !== p) texto(q.nome, q.x, q.y + 27, 11, COR.osso, 600); });
   covas.forEach(c => {
-    if (!dono[c.area] || !c.corpo || c.levantou || c.enfeite === c.corpo.pedido) return;
+    if (!dono[c.area] || !c.corpo || c.levantou || c.enfeite === c.corpo.pedido || !naTela(c.x)) return;
     balao(c.x + 22, c.y - c.h / 2 - 2, c.corpo.pedido);
     if (c.levantarEm != null && c.levantarEm < 2.2) texto('!', c.x - 16, c.y - c.h / 2 - 12, 22, COR.sangue, 700);
   });
@@ -1523,12 +2044,21 @@ function desenhar() {
     if (c.corpo && !c.fechada && !c.levantou && c.fechar > 0) barra(c.x, by, c.fechar, COR.osso);
     else if (!c.corpo && c.prof > 0 && c.prof < 2) barra(c.x, by, c.prof / 2, COR.ambar, .5);
   }
-  inimigos.forEach(e => { if (e.tipo === 'ladrao' && e.estado === 'roubando') barra(e.x, e.y - 28, e.prog, COR.sangue); });
+  inimigos.forEach(e => {
+    if (e.tipo === 'ladrao' && e.estado === 'roubando') barra(e.x, e.y + e.r + 12, e.prog, COR.ambar);
+    if (e.tipo !== 'chefe' && e.vidaMax && e.vida < e.vidaMax - .01) barra(e.x, e.y - e.r - 20, e.vida / e.vidaMax, COR.sangue);
+  });
   flutuantes.forEach(f => {
     ctx.globalAlpha = 1 - Math.max(0, (f.t - .9) / .5);
     texto(f.txt, f.x, f.y, 15, f.cor, 700);
     ctx.globalAlpha = 1;
   });
+  ctx.restore();
+
+  // Na tela
+  desenharVento();
+  desenharSetas();
+  barraChefe();
 }
 
 // ===== HUD e dica =====
@@ -1547,9 +2077,9 @@ function atualizarHUD() {
   pinta('hud-dia', 'textContent', `Dia ${dia} de ${CFG.dias}`);
   pinta('hud-fase', 'textContent', { dia: 'Dia', noite: 'Noite', loja: 'Anoitecer', amanhecer: 'Amanhecer', fim: 'Fim', sala: 'Sala' }[fase] || 'Dia');
   pinta('hud-fase', 'className', 'fase ' + (fase === 'noite' || fase === 'loja' ? 'noite' : 'dia'));
-  const dur = fase === 'noite' ? CFG.duracaoNoite : CFG.duracaoDia;
+  const dur = fase === 'noite' ? duracaoNoite() : CFG.duracaoDia;
   const ativo = fase === 'dia' || fase === 'noite';
-  pinta('hud-relogio', 'textContent', ativo ? fmt(relogio) : fmt(fase === 'loja' ? CFG.duracaoNoite : CFG.duracaoDia));
+  pinta('hud-relogio', 'textContent', ativo ? fmt(relogio) : fmt(fase === 'loja' ? duracaoNoite() : CFG.duracaoDia));
   pinta('hud-barra', 'width', (ativo ? Math.max(0, relogio / dur) * 100 : 100).toFixed(1) + '%');
   pinta('hud-dinheiro', 'textContent', `$${dinheiro}`);
   pinta('hud-meta', 'textContent', `de $${meta}`);
@@ -1557,10 +2087,12 @@ function atualizarHUD() {
   for (let i = 0; i < CFG.vidaMax; i++) v += i < p.vida ? '♥' : '<span class="vazio">♥</span>';
   pinta('hud-vida', 'innerHTML', v);
   pinta('hud-ferramenta', 'textContent', ferramenta().nome);
+  pinta('hud-bota', 'hidden', nivelBota === 0);
+  pinta('hud-bota', 'textContent', bota().nome);
   pinta('hud-lampioes', 'textContent', `Lampiões ${estoque}`);
   pinta('hud-sala', 'hidden', modo === 'solo');
   pinta('hud-sala', 'textContent', `Sala ${codigoSala} · ${jogadores.length} ${jogadores.length === 1 ? 'coveiro' : 'coveiros'}`);
-  pinta('dica', 'innerHTML', textoDica());
+  pinta('dica', 'innerHTML', `<span>${textoDica()}</span>`); // o span evita que o flex engula os espaços em volta do <b>
 }
 
 function textoDica() {
@@ -1582,7 +2114,7 @@ function textoDica() {
     else if (leva && leva.item === a.item) acao = `<b>${K}</b>: devolver ${ITEM[a.item]}`;
     else acao = `<b>${K}</b>: pegar ${ITEM[a.item]}`;
   } else if (a && a.tipo === 'placa') {
-    const preco = CFG.precoTerreno[a.area];
+    const preco = CFG.precoTerreno(a.area);
     acao = dinheiro >= preco ? `<b>${K}</b>: comprar este terreno por $${preco}` : `Terreno à venda por $${preco}. Faltam $${preco - dinheiro}.`;
   } else if (a && a.tipo === 'cova') {
     const c = a.cova;
@@ -1596,6 +2128,7 @@ function textoDica() {
     else if (c.enfeite !== c.corpo.pedido) {
       acao = leva && leva.tipo === 'item' && leva.item === c.corpo.pedido
         ? `<b>${K}</b>: colocar ${ITEM[leva.item]}`
+        : c.enfeite === 'apagada' ? `A vela de ${esc(c.corpo.nome)} apagou. Tem vela nova no canto de baixo, à esquerda.`
         : `${esc(c.corpo.nome)} quer ${ITEM[c.corpo.pedido] || ''}. Tem no canto de baixo, à esquerda.`;
     } else acao = `${esc(c.corpo.nome)} descansa em paz`;
   }
