@@ -66,6 +66,7 @@ kbd{font-family:inherit;font-size:.85em;font-weight:600;padding:1px 6px;border-r
 .cartao input[type=text]{font:inherit;font-size:16px;padding:10px 12px;border-radius:9px;border:1px solid var(--linha);background:var(--tinta-3);color:var(--osso);width:11em;max-width:100%;box-sizing:border-box}
 .cartao input[type=text]:focus-visible{outline:3px solid var(--ambar);outline-offset:1px}
 #codigo{width:6.5em;text-transform:uppercase;letter-spacing:.15em}
+.codigo-sala{font-size:44px;font-weight:700;letter-spacing:.14em;line-height:1.1;color:var(--ambar);-webkit-user-select:text;user-select:text}
 .link-sala{font-family:ui-monospace,Consolas,monospace;font-size:14px;padding:10px 12px;border-radius:9px;background:var(--tinta-3);word-break:break-all;-webkit-user-select:text;user-select:text}
 .jogadores{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
 .jogadores li{display:flex;align-items:center;gap:7px;padding:5px 12px 5px 7px;border-radius:999px;background:var(--tinta-3);font-size:15px}
@@ -712,10 +713,13 @@ function mostrarSala() {
   const anf = modo === 'anfitriao', n = jogadores.length;
   const lista = jogadores.map(q => `<li><i style="background:${corSegura(q.cor)}"></i>${esc(q.nome)}${q === p ? ' (você)' : ''}</li>`).join('');
   mostrarPainel(`<div class="cartao">
-    <div><p class="sobre">Partida online · sala ${esc(codigoSala)}</p><h2>${anf ? 'Chama a galera' : 'Você tá dentro'}</h2></div>
-    ${anf ? `<p>Manda esse link pra galera. Cabem ${CFG.maxJogadores} coveiros, e o jogo só começa quando você quiser.</p>
-      <div class="link-sala" id="link-sala">${esc(linkSala())}</div>
-      <div class="botoes"><button class="btn sec" type="button" data-acao="copiar">Copiar link</button></div>` : ''}
+    <div><p class="sobre">Partida online</p><h2>${anf ? 'Chama a galera' : 'Você tá dentro'}</h2></div>
+    ${anf ? `<p>Passa o código ou manda o link pra galera. Cabem ${CFG.maxJogadores} coveiros, e o jogo só começa quando você quiser.</p>` : ''}
+    <div class="blocos">
+      <div><h3>Código da sala</h3><div class="codigo-sala">${esc(codigoSala)}</div></div>
+      ${anf ? `<div><h3>Ou o link</h3><div class="link-sala" id="link-sala">${esc(linkSala())}</div>
+        <div class="botoes"><button class="btn sec" type="button" data-acao="copiar">Copiar link</button></div></div>` : ''}
+    </div>
     <div><h3>No cemitério · ${n} de ${CFG.maxJogadores}</h3><ul class="jogadores">${lista}</ul></div>
     <p class="nota">${n > 1 ? `Com ${n} coveiros a dívida sobe pra $${metaPara(n)}. Vem mais defunto e mais ladrão também.` : `Por enquanto é só você, com dívida de $${metaPara(1)}. Cada um que entra aumenta a dívida e traz mais defunto e mais ladrão.`}</p>
     ${anf ? '' : esperando('começar')}
