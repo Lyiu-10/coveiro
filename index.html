@@ -83,6 +83,24 @@ kbd{font-family:inherit;font-size:.85em;font-weight:600;padding:1px 6px;border-r
 .resumo{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;font-size:16px}
 .resumo li{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--linha);padding-bottom:6px}
 .resumo b{font-variant-numeric:tabular-nums}
+#hud.fora,#dica.fora{visibility:hidden}
+.cartao.inicio{width:min(440px,100%)}
+.menu{display:flex;flex-direction:column;gap:8px}
+.menu button{font:inherit;display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;box-sizing:border-box;padding:14px 16px;border-radius:10px;border:1px solid var(--linha);background:var(--tinta-3);color:var(--osso);cursor:pointer;text-align:left}
+.menu b{font-size:19px;font-weight:600}
+.menu small{font-size:13.5px;color:var(--osso-2)}
+.menu button:hover{border-color:var(--osso-2)}
+.menu button[data-principal]{background:var(--ambar);border-color:var(--ambar);color:var(--tinta)}
+.menu button[data-principal] small{color:#5a4520}
+.menu button:focus-visible{outline:3px solid var(--osso);outline-offset:2px}
+.convite{padding:10px 12px;border-radius:10px;border:1px solid var(--ambar);font-size:15px}
+.ajustes{display:grid;grid-template-columns:max-content minmax(0,1fr) 3em;align-items:center;gap:14px 12px;font-size:16px}
+.ajuste{display:contents}
+.ajuste input[type=range]{width:100%;margin:0;accent-color:var(--ambar);cursor:pointer}
+.ajuste output{font-variant-numeric:tabular-nums;text-align:right;color:var(--osso-2)}
+.ajuste-marca{grid-column:1/-1;display:flex;align-items:center;gap:10px;cursor:pointer}
+.ajuste-marca input{width:18px;height:18px;margin:0;accent-color:var(--ambar)}
+.ajustes input:focus-visible{outline:3px solid var(--ambar);outline-offset:2px}
 #toque{position:absolute;inset:0;z-index:3;pointer-events:none}
 #joy-zona{position:absolute;left:0;top:0;bottom:0;width:55%;pointer-events:auto;touch-action:none}
 #joy-base{position:absolute;width:110px;height:110px;margin:-55px 0 0 -55px;border-radius:50%;border:2px solid rgba(239,230,210,.25);background:rgba(22,19,28,.25)}
@@ -222,7 +240,7 @@ const limparNome = s => String(s || '').replace(/[^\p{L}\p{N} ._-]/gu, '').trim(
 const reduzMov = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const toque = matchMedia('(pointer: coarse)').matches;
 const online = !window.claude; // dentro do Claude a conexão direta é bloqueada
-const salaUrl = (() => {
+let salaUrl = (() => {
   try { return (new URLSearchParams(location.search).get('sala') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4); }
   catch (e) { return ''; }
 })();
@@ -236,6 +254,68 @@ function mulberry(s) {
 }
 function lerNome() { try { return limparNome(localStorage.getItem('coveiro.nome')); } catch (e) { return 'Coveiro'; } }
 function salvarNome(n) { try { localStorage.setItem('coveiro.nome', n); } catch (e) { /* sem armazenamento */ } }
+
+// ===== Configurações (ficam só neste aparelho) =====
+const CONFIG_PADRAO = { geral: 80, musica: 70, ambiente: 70, efeitos: 80, tremor: !reduzMov };
+function lerConfig() {
+  const c = Object.assign({}, CONFIG_PADRAO);
+  try {
+    const salvo = JSON.parse(localStorage.getItem('coveiro.config') || '{}');
+    ['geral', 'musica', 'ambiente', 'efeitos'].forEach(k => { if (Number.isFinite(salvo[k])) c[k] = Math.max(0, Math.min(100, Math.round(salvo[k]))); });
+    if (typeof salvo.tremor === 'boolean') c.tremor = salvo.tremor;
+  } catch (e) { /* sem armazenamento: fica o padrão */ }
+  return c;
+}
+function salvarConfig() { try { localStorage.setItem('coveiro.config', JSON.stringify(config)); } catch (e) { /* sem armazenamento */ } }
+let config = lerConfig();
+
+// ===== Som: um volume geral e três canais (música, ambiente, efeitos) =====
+// Ainda não há música nem efeito no jogo. Quando entrar, é só ligar o som no canal certo: som.canais.musica, .ambiente ou .efeitos
+const CANAIS = ['musica', 'ambiente', 'efeitos'];
+const som = { ctx: null, geral: null, canais: {} };
+function iniciarSom() {
+  if (som.ctx) { if (som.ctx.state === 'suspended') som.ctx.resume().catch(() => {}); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  try {
+    som.ctx = new AC();
+    som.geral = som.ctx.createGain(); som.geral.connect(som.ctx.destination);
+    CANAIS.forEach(k => { som.canais[k] = som.ctx.createGain(); som.canais[k].connect(som.geral); });
+    aplicarVolumes();
+  } catch (e) { som.ctx = null; }
+}
+const curva = v => (v / 100) ** 2; // o ouvido percebe volume em escala: 50% na barra soa como metade
+function aplicarVolumes() {
+  if (!som.ctx) return;
+  som.geral.gain.value = curva(config.geral);
+  CANAIS.forEach(k => { som.canais[k].gain.value = curva(config[k]); });
+}
+// Som de teste que toca ao soltar cada barra das configurações
+function somDeTeste(canal) {
+  iniciarSom();
+  if (!som.ctx) return;
+  const c = som.ctx, t0 = c.currentTime + .02, destino = som.canais[canal] || som.canais.efeitos;
+  const nota = (freq, ini, dur, tipo, pico) => {
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = tipo; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, t0 + ini); g.gain.linearRampToValueAtTime(pico, t0 + ini + .02);
+    g.gain.exponentialRampToValueAtTime(.001, t0 + ini + dur);
+    o.connect(g); g.connect(destino); o.start(t0 + ini); o.stop(t0 + ini + dur + .05);
+  };
+  if (canal === 'musica') [392, 494, 587].forEach((f, i) => nota(f, i * .14, .5, 'triangle', .25));
+  else if (canal === 'ambiente') {
+    // um sopro de vento: ruído filtrado
+    const b = c.createBuffer(1, Math.floor(c.sampleRate * .9), c.sampleRate), d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const n = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+    f.type = 'bandpass'; f.frequency.value = 500; f.Q.value = .8;
+    g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(.4, t0 + .35); g.gain.linearRampToValueAtTime(0, t0 + .9);
+    n.buffer = b; n.connect(f); f.connect(g); g.connect(destino); n.start(t0);
+  } else { nota(660, 0, .14, 'square', .12); nota(440, .09, .16, 'square', .1); }
+}
+// O navegador só libera o som depois de um clique ou tecla
+addEventListener('pointerdown', iniciarSom, { once: true });
+addEventListener('keydown', iniciarSom, { once: true });
 
 const tela = $('#tela'), ctx = tela.getContext('2d'), palco = $('#palco');
 let escala = 1, dpr = 1;
@@ -352,7 +432,7 @@ function fim(tipo) {
 }
 
 function pausar() { if (modo !== 'solo') return; estadoPausado = estado; estado = 'pausa'; soltar(); renderPainel(); }
-function despausar() { estado = estadoPausado; renderPainel(); }
+function despausar() { estado = estadoPausado; subtela = null; renderPainel(); }
 
 function comprar(item) {
   if (item === 'ferramenta') {
@@ -372,14 +452,18 @@ function mostrarPainel(html) {
   el.innerHTML = html; el.hidden = false;
 }
 function esconderPainel() {
-  $('#painel').hidden = true;
+  $('#painel').hidden = true; subtela = null;
   const a = document.activeElement;
   if (a && a.blur && a !== document.body) a.blur();
 }
 
+// Antes do jogo: início → solo | multiplayer. As configurações abrem por cima de qualquer tela
+let telaInicio = 'inicio', subtela = null;
+
 function renderPainel() {
+  if (subtela === 'config') return mostrarConfig();
   switch (estado) {
-    case 'titulo': return mostrarTitulo();
+    case 'titulo': return telaInicio === 'solo' ? mostrarSolo() : telaInicio === 'multi' ? mostrarMulti() : mostrarInicio();
     case 'sala': return mostrarSala();
     case 'loja': return mostrarLoja();
     case 'amanhecer': return mostrarAmanhecer();
@@ -392,36 +476,95 @@ function renderPainel() {
 const anfitriaoNome = () => { const h = jogadores.find(q => q.id === 'h'); return h ? h.nome : 'o anfitrião'; };
 const esperando = acao => `<p class="espera">Esperando ${esc(anfitriaoNome())} ${acao}.</p>`;
 
-function mostrarTitulo() {
+function mostrarInicio() {
+  mostrarPainel(`<div class="cartao inicio">
+    <div><p class="sobre">Um cemitério, cinco dias, uma dívida</p><h1>Coveiro</h1></div>
+    <nav class="menu" aria-label="Menu">
+      <button type="button" data-acao="tela-solo" data-principal><b>Solo</b><small>Você, a pá e a dívida</small></button>
+      <button type="button" data-acao="tela-multi"><b>Multiplayer</b><small>Até ${CFG.maxJogadores} coveiros no mesmo cemitério</small></button>
+      <button type="button" data-acao="config"><b>Configurações</b><small>Som e tela</small></button>
+    </nav>
+  </div>`);
+}
+
+function comoJogar() {
   const deitado = toque && matchMedia('(orientation: portrait)').matches ? ' Fica melhor com o celular deitado.' : '';
   const controles = toque
     ? `Arraste do lado esquerdo da tela para andar. Segure <b>Ação</b> para cavar e fechar.${deitado}`
     : '<kbd>WASD</kbd> ou setas para andar · <kbd>Espaço</kbd> ação (segure para cavar e fechar) · <kbd>Q</kbd> lampião · <kbd>P</kbd> pausa';
-  const convite = online && salaUrl;
-  const botoes = convite
-    ? `<button class="btn" type="button" data-acao="entrar-link" data-principal>Entrar na sala ${esc(salaUrl)}</button>
-       <button class="btn sec" type="button" data-acao="solo">Jogar sozinho</button>`
-    : `<button class="btn" type="button" data-acao="solo" data-principal>Jogar sozinho</button>
-       ${online ? '<button class="btn sec" type="button" data-acao="criar">Criar partida online</button>' : ''}`;
-  mostrarPainel(`<div class="cartao">
-    <div><p class="sobre">Um cemitério, cinco dias, uma dívida</p><h1>Coveiro</h1></div>
-    <p>Seu tio morreu e deixou para você um cemitério e uma dívida de <b>$${CFG.meta}</b> com a prefeitura. Você tem ${CFG.dias} dias para pagar.</p>
-    <div class="blocos">
+  return `<div class="blocos">
       <div><h3>De dia · 2 minutos</h3><ol>
         <li>Pegue um corpo na carroça.</li>
         <li>Cave a cova. Ogro paga mais, mas pede cova grande.</li>
         <li>Coloque o corpo e feche a cova.</li>
         <li>Atenda o pedido do morto: rosa vermelha ou vela.</li>
       </ol></div>
-      <div><h3>De noite</h3><p>Ladrões pulam o muro atrás das covas. Morto mal enterrado levanta e vem atrás de você. Bata com o que tiver na mão. A noite acaba quando o cemitério ficar limpo. Se a vida acabar, acabou.</p></div>
+      <div><h3>De noite</h3><p>Ladrões pulam o muro atrás das covas. Morto mal enterrado levanta e vem atrás de você. Bata com o que tiver na mão: ladrão derrubado solta moedas. A noite acaba quando o cemitério ficar limpo. Se a vida acabar, acabou.</p></div>
     </div>
-    <p class="controles">${controles}</p>
-    ${online ? `<div class="linha-nome"><label for="nome">Seu nome</label><input id="nome" type="text" maxlength="14" value="${esc(p.nome)}" autocomplete="off" spellcheck="false"></div>` : ''}
-    <div class="botoes">${botoes}</div>
-    ${online && !convite ? `<div class="entrar"><input id="codigo" type="text" maxlength="4" placeholder="Código" autocomplete="off" spellcheck="false" aria-label="Código da sala"><button class="btn sec" type="button" data-acao="entrar">Entrar numa partida</button></div>` : ''}
-    ${!online && LINK_ABERTO ? `<p class="nota">Para jogar com amigos, abra o jogo neste endereço: <a href="${esc(LINK_ABERTO)}" target="_blank" rel="noopener">${esc(LINK_ABERTO.replace(/^https?:\/\//, ''))}</a></p>` : ''}
+    <p class="controles">${controles}</p>`;
+}
+
+function mostrarSolo() {
+  mostrarPainel(`<div class="cartao">
+    <div><p class="sobre">Solo</p><h2>Como jogar</h2></div>
+    <p>Seu tio morreu e deixou para você um cemitério e uma dívida de <b>$${CFG.meta}</b> com a prefeitura. Você tem ${CFG.dias} dias para pagar.</p>
+    ${comoJogar()}
+    <div class="botoes">
+      <button class="btn" type="button" data-acao="jogar-solo" data-principal>Começar</button>
+      <button class="btn sec" type="button" data-acao="tela-inicio">Voltar</button>
+    </div>
   </div>`);
 }
+
+function mostrarMulti() {
+  const link = LINK_ABERTO ? `<a href="${esc(LINK_ABERTO)}" target="_blank" rel="noopener">${esc(LINK_ABERTO.replace(/^https?:\/\//, ''))}</a>` : '';
+  if (!online) {
+    mostrarPainel(`<div class="cartao">
+      <div><p class="sobre">Multiplayer</p><h2>Jogar junto</h2></div>
+      <p>Aqui dentro do Claude a conexão entre navegadores é bloqueada. Para jogar com amigos, abra o jogo neste endereço: ${link}</p>
+      <div class="botoes"><button class="btn" type="button" data-acao="tela-inicio" data-principal>Voltar</button></div>
+    </div>`);
+    return;
+  }
+  const convite = salaUrl;
+  mostrarPainel(`<div class="cartao">
+    <div><p class="sobre">Multiplayer</p><h2>Jogar junto</h2></div>
+    <p>Até ${CFG.maxJogadores} coveiros no mesmo cemitério. Quem cria a sala manda o link, e os outros entram por ele ou pelo código de 4 letras.</p>
+    <div class="linha-nome"><label for="nome">Seu nome</label><input id="nome" type="text" maxlength="14" value="${esc(p.nome)}" autocomplete="off" spellcheck="false"></div>
+    ${convite ? `<div class="convite">Você foi chamado para a sala <b>${esc(salaUrl)}</b>.</div>
+      <div class="botoes"><button class="btn" type="button" data-acao="entrar-link" data-principal>Entrar na sala ${esc(salaUrl)}</button></div>` : ''}
+    <div class="blocos">
+      <div><h3>Criar uma sala</h3><div class="botoes"><button class="btn${convite ? ' sec' : ''}" type="button" data-acao="criar"${convite ? '' : ' data-principal'}>Criar sala</button></div></div>
+      <div><h3>Entrar numa sala</h3><div class="entrar"><input id="codigo" type="text" maxlength="4" placeholder="Código" autocomplete="off" spellcheck="false" aria-label="Código da sala"><button class="btn sec" type="button" data-acao="entrar">Entrar</button></div></div>
+    </div>
+    <div class="botoes"><button class="btn sec" type="button" data-acao="tela-inicio">Voltar</button></div>
+  </div>`);
+}
+
+function mostrarConfig() {
+  const barra = (k, nome) => `<div class="ajuste">
+      <label for="vol-${k}">${nome}</label>
+      <input type="range" id="vol-${k}" data-vol="${k}" min="0" max="100" step="5" value="${config[k]}">
+      <output for="vol-${k}" id="saida-${k}">${config[k]}%</output>
+    </div>`;
+  mostrarPainel(`<div class="cartao">
+    <div><p class="sobre">Configurações</p><h2>Som e tela</h2></div>
+    <div class="ajustes">
+      ${barra('geral', 'Volume geral')}
+      ${barra('musica', 'Música')}
+      ${barra('ambiente', 'Ambiente')}
+      ${barra('efeitos', 'Efeitos')}
+      <label class="ajuste-marca"><input type="checkbox" id="cfg-tremor"${config.tremor ? ' checked' : ''}> Tremer a tela nos impactos</label>
+    </div>
+    <p class="nota">O jogo ainda não tem música nem efeitos. Ao soltar cada barra, toca um som de teste naquele volume. As configurações ficam guardadas só neste aparelho.</p>
+    <div class="botoes">
+      <button class="btn" type="button" data-acao="fechar-config" data-principal>Voltar</button>
+      <button class="btn sec" type="button" data-acao="config-padrao">Restaurar o padrão</button>
+    </div>
+  </div>`);
+}
+
+function fecharConfig() { subtela = null; renderPainel(); }
 
 function mostrarSala() {
   const anf = modo === 'anfitriao', n = jogadores.length;
@@ -433,7 +576,12 @@ function mostrarSala() {
       <div class="botoes"><button class="btn sec" type="button" data-acao="copiar">Copiar link</button></div>` : ''}
     <div><h3>No cemitério · ${n} de ${CFG.maxJogadores}</h3><ul class="jogadores">${lista}</ul></div>
     <p class="nota">${n > 1 ? `Com ${n} coveiros, a dívida sobe para $${metaPara(n)}, e chegam mais corpos e mais ladrões.` : `Sozinho, a dívida é de $${metaPara(1)}. Cada coveiro a mais aumenta a dívida, os corpos e os ladrões.`}</p>
-    ${anf ? '<button class="btn" type="button" data-acao="comecar" data-principal>Começar</button>' : esperando('começar')}
+    ${anf ? '' : esperando('começar')}
+    <div class="botoes">
+      ${anf ? '<button class="btn" type="button" data-acao="comecar" data-principal>Começar</button>' : ''}
+      <button class="btn sec" type="button" data-acao="config">Configurações</button>
+      <button class="btn sec" type="button" data-acao="sair-multi">Sair da sala</button>
+    </div>
   </div>`);
 }
 
@@ -484,7 +632,11 @@ function mostrarFim() {
   mostrarPainel(`<div class="cartao">
     <div><p class="sobre">${t[0]}</p><h2>${t[1]}</h2></div>
     <p>${t[2]}</p>
-    ${modo !== 'convidado' ? `<button class="btn" type="button" data-acao="reiniciar" data-principal>${t[3]}</button>` : esperando('recomeçar')}
+    ${modo === 'convidado' ? esperando('recomeçar') : ''}
+    <div class="botoes">
+      ${modo !== 'convidado' ? `<button class="btn" type="button" data-acao="reiniciar" data-principal>${t[3]}</button>` : ''}
+      <button class="btn sec" type="button" data-acao="${modo === 'solo' ? 'sair-menu' : 'sair-multi'}">${modo === 'solo' ? 'Menu' : 'Sair da sala'}</button>
+    </div>
   </div>`);
 }
 
@@ -492,7 +644,11 @@ function mostrarPausa() {
   mostrarPainel(`<div class="cartao">
     <div><p class="sobre">Pausado</p><h2>O relógio parou</h2></div>
     <p>Os mortos esperam. Os ladrões também.</p>
-    <button class="btn" type="button" data-acao="continuar" data-principal>Continuar</button>
+    <div class="botoes">
+      <button class="btn" type="button" data-acao="continuar" data-principal>Continuar</button>
+      <button class="btn sec" type="button" data-acao="config">Configurações</button>
+      <button class="btn sec" type="button" data-acao="sair-menu">Sair para o menu</button>
+    </div>
   </div>`);
 }
 
@@ -509,7 +665,13 @@ $('#painel').addEventListener('click', e => {
   if (!b || b.disabled || performance.now() - painelEm < 250) return;
   const acao = b.dataset.acao;
   switch (acao) {
-    case 'solo': modo = 'solo'; novoJogo(); comecarDia(); break;
+    case 'tela-inicio': case 'tela-solo': case 'tela-multi': telaInicio = acao.slice(5); renderPainel(); break;
+    case 'jogar-solo': modo = 'solo'; novoJogo(); comecarDia(); break;
+    case 'config': subtela = 'config'; renderPainel(); break;
+    case 'fechar-config': fecharConfig(); break;
+    case 'config-padrao': config = Object.assign({}, CONFIG_PADRAO); salvarConfig(); aplicarVolumes(); renderPainel(); break;
+    case 'sair-menu': voltarInicio('inicio'); break;
+    case 'sair-multi': voltarInicio('multi'); break;
     case 'criar': criarSala(); break;
     case 'entrar': entrarSala(($('#codigo') || {}).value || ''); break;
     case 'entrar-link': entrarSala(salaUrl); break;
@@ -519,7 +681,7 @@ $('#painel').addEventListener('click', e => {
     case 'continuar': despausar(); break;
     case 'reiniciar': novoJogo(); comecarDia(); break;
     case 'copiar': copiarLink(); break;
-    case 'voltar': voltarInicio(); break;
+    case 'voltar': voltarInicio('multi'); break;
     case 'ferramenta': case 'bota': case 'lampiao':
       if (modo === 'convidado') { p.compraSeq++; p.compraItem = acao; enviarEntrada(true); } else comprar(acao);
       break;
@@ -527,6 +689,16 @@ $('#painel').addEventListener('click', e => {
 });
 $('#painel').addEventListener('input', e => {
   if (e.target.id === 'nome') { p.nome = limparNome(e.target.value); salvarNome(p.nome); }
+  const k = e.target.dataset.vol;
+  if (k) {
+    config[k] = +e.target.value; aplicarVolumes(); salvarConfig();
+    const saida = $('#saida-' + k);
+    if (saida) saida.textContent = config[k] + '%';
+  }
+});
+$('#painel').addEventListener('change', e => {
+  if (e.target.dataset.vol) somDeTeste(e.target.dataset.vol);
+  if (e.target.id === 'cfg-tremor') { config.tremor = e.target.checked; salvarConfig(); }
 });
 
 let avisoTimer = 0;
@@ -551,7 +723,7 @@ function flutua(x, y, txt, cor, q) {
   if (modo === 'anfitriao' && q !== p) eventos.push({ f: [Math.round(f.x), Math.round(f.y), txt, cor], para: q ? q.id : undefined });
 }
 function tremer(t, q) {
-  if ((!q || q === p) && !reduzMov) tremor = Math.max(tremor, t);
+  if ((!q || q === p) && config.tremor) tremor = Math.max(tremor, t);
   if (modo === 'anfitriao' && q !== p) eventos.push({ tr: t, para: q ? q.id : undefined });
 }
 
@@ -572,6 +744,12 @@ addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   const jogando = estado === 'dia' || estado === 'noite';
   const foco = document.activeElement;
+  // Esc volta uma tela: fecha as configurações ou volta ao início
+  if (k === 'escape' && !e.repeat && (subtela || (estado === 'titulo' && telaInicio !== 'inicio'))) {
+    e.preventDefault();
+    if (subtela) fecharConfig(); else { telaInicio = 'inicio'; renderPainel(); }
+    return;
+  }
   if (foco && foco.tagName === 'INPUT') {
     if (k === 'enter' && !e.repeat) {
       const b = foco.id === 'codigo' ? $('#painel [data-acao=entrar]') : $('#painel [data-principal]');
@@ -585,6 +763,16 @@ addEventListener('keydown', e => {
     return;
   }
   if (!jogando) {
+    // setas para cima e para baixo andam entre os botões da tela
+    if (k === 'arrowdown' || k === 'arrowup') {
+      const bs = [...document.querySelectorAll('#painel:not([hidden]) button:not(:disabled)')];
+      if (bs.length) {
+        e.preventDefault();
+        const i = bs.indexOf(foco);
+        bs[i < 0 ? 0 : (i + (k === 'arrowdown' ? 1 : bs.length - 1)) % bs.length].focus();
+      }
+      return;
+    }
     if (k === 'enter' && !e.repeat && !(foco && foco.closest && foco.closest('#painel button'))) {
       const b = $('#painel [data-principal]');
       if (b && performance.now() - painelEm > 300) { e.preventDefault(); b.click(); }
@@ -1210,12 +1398,13 @@ function erroRede(msg) {
   mostrarMensagem('Não conectou', msg, 'Voltar ao início');
 }
 
-function voltarInicio() {
+// Sai de qualquer partida e volta para uma das telas de antes do jogo ('inicio' ou 'multi')
+function voltarInicio(tela = 'inicio') {
   if (peer) { try { peer.destroy(); } catch (e) { /* já fechado */ } }
-  peer = null; conexaoAnfitriao = null; conexoes.clear(); codigoSala = '';
+  peer = null; conexaoAnfitriao = null; conexoes.clear(); codigoSala = ''; salaUrl = '';
   modo = 'solo'; p.id = 'eu'; jogadores = [p];
   try { if (location.search) history.replaceState(null, '', location.pathname); } catch (e) { /* sem histórico */ }
-  estado = 'titulo'; novoJogo(); renderPainel();
+  estado = 'titulo'; telaInicio = tela; subtela = null; soltar(); novoJogo(); renderPainel();
 }
 
 async function criarSala() {
@@ -1396,7 +1585,7 @@ function aplicarMundo(m) {
     if (ev.f) flutuantes.push({ x: ev.f[0], y: ev.f[1], txt: String(ev.f[2]), cor: corSegura(ev.f[3]), t: 0 });
     if (ev.fx && ['rosa', 'fumaca', 'explosao'].includes(ev.fx[0])) efeitoLocal(ev.fx[0], +ev.fx[1] || 0, +ev.fx[2] || 0);
     if (ev.a) avisoLocal(String(ev.a));
-    if (ev.tr && !reduzMov) tremor = Math.max(tremor, +ev.tr || 0);
+    if (ev.tr && config.tremor) tremor = Math.max(tremor, +ev.tr || 0);
   });
   if (antes !== estado && (antes === 'dia' || antes === 'noite')) soltar();
   const sig = [estado, dia, dinheiro, nivelFerr, nivelBota, estoque, tipoFim, stats.ganho, stats.roubado, stats.recuperado, jogadores.map(q => q.nome + q.cor).join(',')].join('|');
@@ -2092,7 +2281,11 @@ function atualizarHUD() {
   pinta('hud-lampioes', 'textContent', `Lampiões ${estoque}`);
   pinta('hud-sala', 'hidden', modo === 'solo');
   pinta('hud-sala', 'textContent', `Sala ${codigoSala} · ${jogadores.length} ${jogadores.length === 1 ? 'coveiro' : 'coveiros'}`);
-  pinta('dica', 'innerHTML', `<span>${textoDica()}</span>`); // o span evita que o flex engula os espaços em volta do <b>
+  pinta('dica', 'innerHTML', `<span>${textoDica()}</span>`);
+  // antes do jogo, o HUD e a dica somem (mantêm o espaço para a tela não pular ao começar)
+  const fora = estado === 'titulo' || estado === 'sala' || estado === 'conexao' ? 'fora' : '';
+  pinta('hud', 'className', fora);
+  pinta('dica', 'className', fora); // o span evita que o flex engula os espaços em volta do <b>
 }
 
 function textoDica() {
@@ -2181,7 +2374,8 @@ if (toque) {
 // ===== Começo =====
 novoJogo();
 redimensionar();
-mostrarTitulo();
+telaInicio = online && salaUrl ? 'multi' : 'inicio'; // quem chega por um link de convite cai direto no multiplayer
+renderPainel();
 let ultimo = performance.now();
 function quadro(t) {
   const dt = Math.min(.05, Math.max(0, (t - ultimo) / 1000));
