@@ -72,7 +72,6 @@ kbd{font-family:inherit;font-size:.85em;font-weight:600;padding:1px 6px;border-r
 .saldo{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .saldo b{font-size:30px;color:var(--ambar);font-variant-numeric:tabular-nums}
 .saldo span{color:var(--osso-2)}
-.alerta{padding:10px 12px;border-radius:10px;background:var(--tinta-3);font-size:15px;line-height:1.45}
 .loja{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
 .loja li{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 12px;border-radius:10px;background:var(--tinta-3)}
 .loja li div{display:flex;flex-direction:column;gap:2px}
@@ -104,7 +103,6 @@ kbd{font-family:inherit;font-size:.85em;font-weight:600;padding:1px 6px;border-r
 .menu button[data-principal]{background:var(--ambar);border-color:var(--ambar);color:var(--tinta)}
 .menu button[data-principal] small{color:#5a4520}
 .menu button:focus-visible{outline:3px solid var(--osso);outline-offset:2px}
-.convite{padding:10px 12px;border-radius:10px;border:1px solid var(--ambar);font-size:15px}
 .ajustes{display:grid;grid-template-columns:max-content minmax(0,1fr) 3em;align-items:center;gap:14px 12px;font-size:16px}
 .ajuste{display:contents}
 .ajuste input[type=range]{width:100%;margin:0;accent-color:var(--ambar);cursor:pointer}
@@ -608,7 +606,7 @@ function comecarNoite() {
   tChefe = ultimaNoite() ? CFG.chefe.chegaEm : null;
   covas.forEach(c => { if (malResolvida(c)) c.levantarEm = rnd(3, 10); });
   renderPainel();
-  aviso(n === 1 ? 'Anoiteceu. Um ladrão vem aí.' : `Anoiteceu. ${n} ladrões vêm aí.`);
+  aviso('Anoiteceu.');
 }
 
 function amanhecer() {
@@ -747,8 +745,7 @@ function mostrarMulti() {
   mostrarPainel(`<div class="cartao">
     <div><p class="sobre">Multiplayer</p><h2>Jogar junto</h2></div>
     <div class="linha-nome"><label for="nome">Seu nome</label><input id="nome" type="text" maxlength="14" value="${esc(p.nome)}" autocomplete="off" spellcheck="false"></div>
-    ${convite ? `<div class="convite">Te chamaram pra sala <b>${esc(salaUrl)}</b>.</div>
-      <div class="botoes"><button class="btn" type="button" data-acao="entrar-link" data-principal>Entrar na sala ${esc(salaUrl)}</button></div>` : ''}
+    ${convite ? `<div class="botoes"><button class="btn" type="button" data-acao="entrar-link" data-principal>Entrar na sala ${esc(salaUrl)}</button></div>` : ''}
     <div class="blocos">
       <div><h3>Criar uma sala</h3><div class="botoes"><button class="btn${convite ? ' sec' : ''}" type="button" data-acao="criar"${convite ? '' : ' data-principal'}>Criar sala</button></div></div>
       <div><h3>Entrar numa sala</h3><div class="entrar"><input id="codigo" type="text" maxlength="4" placeholder="Código" autocomplete="off" spellcheck="false" aria-label="Código da sala"><button class="btn sec" type="button" data-acao="entrar">Entrar</button></div></div>
@@ -771,7 +768,7 @@ function mostrarConfig() {
       ${barra('ambiente', 'Ambiente')}
       ${barra('efeitos', 'Efeitos')}
       <label class="ajuste-marca"><input type="checkbox" id="cfg-tremor"${config.tremor ? ' checked' : ''}> Tremer a tela</label>
-      <label class="ajuste-marca"><input type="checkbox" id="cfg-leve"${config.leve ? ' checked' : ''}> Modo leve (computador fraco)</label>
+      <label class="ajuste-marca"><input type="checkbox" id="cfg-leve"${config.leve ? ' checked' : ''}> Modo leve</label>
     </div>
     <div class="botoes">
       <button class="btn" type="button" data-acao="fechar-config" data-principal>Voltar</button>
@@ -806,7 +803,6 @@ function mostrarSala() {
 const ABAS_LOJA = [['equipamento', 'Equipamento'], ['cemiterio', 'Cemitério'], ['combate', 'Combate']];
 
 function mostrarLoja() {
-  const n = nLadroes();
   // uma linha da loja: nome, efeito curto e o botão com o preço do próximo nível (ou "no máximo")
   const linha = (acao, nome, desc, acabou) => {
     const preco = ITENS_LOJA[acao].preco();
@@ -838,7 +834,6 @@ function mostrarLoja() {
   mostrarPainel(`<div class="cartao largo">
     <div><p class="sobre">Anoitecer do dia ${dia} de ${CFG.dias}</p><h2>Loja do coveiro</h2></div>
     <div class="saldo"><b>$${dinheiro}</b><span>de $${meta} · vence no dia ${CFG.dias + 1}</span></div>
-    <div class="alerta">Hoje à noite ${n === 1 ? 'vem um ladrão' : 'vêm ' + n + ' ladrões'}.${ultimaNoite() ? ' E o chefe deles.' : ''}</div>
     <div class="loja-corpo">
       <nav class="loja-abas" role="tablist" aria-label="Seções da loja">
         ${ABAS_LOJA.map(([k, nome]) => `<button type="button" role="tab" data-acao="aba-${k}" aria-selected="${lojaAba === k}">${nome}</button>`).join('')}
@@ -1127,7 +1122,7 @@ function acaoPress(q) {
       dinheiro -= preco; dono[a.area] = true; tocar('compra', q.x, q.y);
       ajustarAreas(areasVisiveis());
       flutua(ar.x + ar.w / 2, ar.y + ar.h / 2 - 40, `-$${preco}`, COR.ambar);
-      aviso(`${modo === 'solo' ? 'Terreno comprado' : q.nome + ' comprou o terreno'}. Mais 12 covas de espaço.`);
+      aviso(`${modo === 'solo' ? 'Terreno comprado' : q.nome + ' comprou o terreno'}.`);
     } else flutua(q.x, q.y - 34, `Faltam $${preco - dinheiro}`, COR.osso, q);
     return;
   }
@@ -1194,7 +1189,7 @@ function ganhar(v, x, y) {
 
 function colocarLampiao(q) {
   if (estado !== 'dia' && estado !== 'noite') return;
-  if (estoque <= 0) { aviso('Acabou o lampião. Dá pra comprar mais no anoitecer.', q); return; }
+  if (estoque <= 0) { aviso('Acabou o lampião.', q); return; }
   if (lampioes.some(l => Math.hypot(l.x - q.x, l.y - q.y) < 30)) { flutua(q.x, q.y - 34, 'Já tem um aqui', COR.osso, q); return; }
   lampioes.push({ x: Math.round(q.x), y: Math.round(q.y + 4) }); estoque--; tocar('pop', q.x, q.y);
   flutua(q.x, q.y - 34, 'Lampião aceso', COR.ambar);
@@ -1323,7 +1318,7 @@ function roubar(e) {
   dinheiro -= v; e.saque = v; stats.roubado += v; tocar('roubo', c.x, c.y);
   c.fechada = false; c.fechar = 0; c.enfeite = null;
   flutua(c.x, c.y - 44, v > 0 ? `-$${v}` : 'Revirou a cova', COR.sangue);
-  aviso(v > 0 ? `Levaram $${v}! Pega o ladrão antes que ele fuja.` : 'Um ladrão revirou uma cova.');
+  aviso(v > 0 ? `Levaram $${v}!` : 'Um ladrão revirou uma cova.');
   e.estado = 'fugindo'; e.alvo = null;
 }
 
@@ -2808,7 +2803,7 @@ function vigiarLentidao(real) {
   lentoT = 0; lentoN = 0;
   if (media < 1 / 35) return;
   config.leve = true; config.leveAuto = false; salvarConfig(); aplicarLeve();
-  avisoLocal('Tava pesado aqui, então liguei o modo leve. Dá pra desligar nas Configurações.');
+  avisoLocal('Modo leve ligado.');
 }
 new ResizeObserver(redimensionar).observe(palco);
 addEventListener('resize', redimensionar);
