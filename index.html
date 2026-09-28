@@ -128,7 +128,6 @@ kbd{font-family:inherit;font-size:.85em;font-weight:600;padding:1px 6px;border-r
       <div class="relogio" aria-hidden="true"><div id="hud-barra"></div></div>
       <span id="hud-relogio" class="num">2:00</span>
       <button id="btn-vel" class="hud-btn" type="button" title="Velocidade do jogo">1x</button>
-      <button id="btn-pular" class="hud-btn" type="button" title="Pular a noite" hidden>Pular a noite</button>
     </div>
     <div class="hud-grupo">
       <span class="dinheiro num"><b id="hud-dinheiro">$0</b><span id="hud-meta">de $200</span></span>
@@ -163,9 +162,10 @@ const CFG = {
   duracaoNoite: 60,     // teto: a noite acaba antes quando o cemitério fica limpo
   intervaloChegada: 20, // sozinho; online chega corpo mais rápido
   chanceOgro: 0.3,
-  pagamento: { humano: 12, ogro: 26, goblin: 8 }, // ogro: o dobro do humano e mais um pouco
+  vampiro: { desdeDia: 2, chance: 0.15 }, // parte dos defuntos a partir do dia 2; precisa de estaca antes de fechar
+  pagamento: { humano: 12, ogro: 26, goblin: 8, vampiro: 20 }, // ogro: o dobro do humano e mais um pouco; vampiro: $20 provisório
   gorjeta: 5,
-  profundidade: { humano: 1, ogro: 2, goblin: 1 },
+  profundidade: { humano: 1, ogro: 2, goblin: 1, vampiro: 1 },
   cavarPorSeg: 0.16,
   fecharPorSeg: 0.5,
   velocidade: 165,
@@ -240,7 +240,10 @@ const CFG = {
     humano: { vida: 3, vel: 62, dano: 1, r: 13 },
     goblin: { vida: 2, vel: 70, dano: 1, r: 11 },
     ogro: { vida: 8, vel: 46, dano: 2, r: 19 },
+    vampiro: { vida: 6, vel: 105, dano: 2, r: 13 },
   },
+  // Necromante: fica longe, mira uma cova (ela brilha verde por "aviso" s) e levanta o morto dela, mesmo de cova bem resolvida
+  necromante: { desdeDia: 4, chance: 0.5, vida: 8, vel: 70, r: 14, intervalo: 6, aviso: 1.5, foge: 110, moedas: 10 },
   // Ladrão derrubado solta moedas no chão: o que ele levou mais um trocado. Passe por cima para pegar
   moedas: { ladrao: d => 2 + d, brutamontes: d => 6 + 2 * d, chefe: 40, valor: 3, pegar: 26 },
   // Chefão: vem na última noite. Todo ataque dele avisa antes de acertar
@@ -264,6 +267,8 @@ const CFG = {
   // Eventos do dia: no máximo um por dia, sorteado quando o dia começa
   eventos: {
     vento: { desdeDia: 2, chance: 0.6, aviso: 3, velocidade: 300, pegaCova: 0.75 },
+    chuva: { desdeDia: 2, chance: 0.4, aviso: 3, dura: 25, enche: 0.06 }, // enche: quanto da cova aberta e vazia a água desfaz por segundo
+    velorio: { desdeDia: 2, chance: 0.4, aviso: 2, prazo: 45 },          // defunto com pressa: enterrado e atendido no prazo, paga em dobro
   },
 };
 // Endereço público do jogo, mostrado a quem abre pelo Claude (onde o online não funciona)
@@ -273,9 +278,9 @@ const LINK_ABERTO = 'https://lyiu-10.github.io/coveiro/';
 const W = 960, H = 560; // tamanho da tela; o mundo desce conforme compra terreno
 const AREA = { x0: 210, passo: 250, y: 60, w: 236, h: 460, colunas: 3, passoY: 500 };
 const SLOTS = [0, 1, 2, 3].map(i => ({ x: 96, y: 132 + i * 72 }));
-const ESTANDES = [{ item: 'rosa', x: 64, y: 474 }, { item: 'vela', x: 140, y: 474 }];
+const ESTANDES = [{ item: 'rosa', x: 44, y: 474 }, { item: 'vela', x: 100, y: 474 }, { item: 'estaca', x: 156, y: 474 }];
 const CORES = ['#3d3550', '#2f6070', '#7a3b2e', '#56692f'];
-const ITEM = { rosa: 'rosa vermelha', vela: 'vela' };
+const ITEM = { rosa: 'rosa vermelha', vela: 'vela', estaca: 'estaca' };
 const COR = {
   tinta: '#16131c', osso: '#efe6d2', ambar: '#f2b544', sangue: '#e0525a',
   madeira: '#8a5a33', madeiraEsc: '#5e3c21', terra: '#7a5230', monte: '#6e4a2b',
@@ -412,6 +417,7 @@ const SONS = {
   vitoria: (t, d) => [523, 659, 784, 1047].forEach((f, i) => tom('triangle', f, t + i * .13, i === 3 ? 1.1 : .5, .16, d)),
   derrota: (t, d) => [392, 370, 349, 330].forEach((f, i) => tom('triangle', f, t + i * .38, i === 3 ? 1.2 : .42, .16, d, i === 3 ? 290 : 0)),
   grilo: (t, d) => { for (let i = 0; i < 3; i++) tom('sine', 4400, t + i * .055, .035, .06, d); },
+  feitico: (t, d) => { tom('sine', 220, t, .9, .12, d, 660); tom('triangle', 330, t + .1, .8, .08, d, 990); },
   passaro: (t, d) => { tom('sine', 2300, t, .1, .07, d, 3100); tom('sine', 2600, t + .14, .08, .06, d, 3300); },
   besta: (t, d) => { tom('triangle', 520, t, .07, .16, d, 180); chiado(t, .09, .12, d, 'highpass', 2500); },
 };
@@ -477,7 +483,7 @@ function agendarMusica() {
 setInterval(agendarMusica, 100);
 
 // --- Ambiente e o que muda com a fase: grilo à noite, passarinho de dia, vento na ventania, pá cavando ---
-let ventoSom = null, faseSom = '', tCavar = 0;
+let ventoSom = null, chuvaSom = null, faseSom = '', tCavar = 0;
 function atualizarSom(dt) {
   if (!som.ctx || som.ctx.state !== 'running') return;
   const fase = estado === 'pausa' ? estadoPausado : estado;
@@ -499,6 +505,13 @@ function atualizarSom(dt) {
     ventoSom = { g, f };
   }
   ventoSom.g.gain.setTargetAtTime(ventoVis * .45, t, .2);
+  if (!chuvaSom) {
+    const n = som.ctx.createBufferSource(), f = som.ctx.createBiquadFilter(), g = som.ctx.createGain();
+    n.buffer = ruido(); n.loop = true; f.type = 'highpass'; f.frequency.value = 2400; g.gain.value = 0;
+    n.connect(f); f.connect(g); g.connect(a); n.start();
+    chuvaSom = { g };
+  }
+  chuvaSom.g.gain.setTargetAtTime(chuvaVis * .3, t, .3);
   ventoSom.f.frequency.setTargetAtTime(380 + ventoVis * 260 + Math.sin(tempo * 1.7) * 60, t, .3);
   if ((fase === 'dia' || fase === 'noite') && p.trabalhando && !p.caido) {
     tCavar -= dt;
@@ -529,12 +542,12 @@ let fila = [null, null, null, null], covas = [], lampioes = [], inimigos = [], f
 let torres = [], idTorre = 0;
 let AREAS = [], mundoW = W, mundoH = H, camX = 0, camY = 0, camDX = 0, camDY = 0;
 let evento = null, eventoHoje = null, tChefe = null, moedas = [], perigos = [];
-let soltas = [], rajadas = [], folhas = [], ventoVis = 0;
+let soltas = [], rajadas = [], folhas = [], ventoVis = 0, chuvaVis = 0, tNecro = null;
 let stats = { ganho: 0, roubado: 0, recuperado: 0, enterros: 0 }, idCorpo = 0, idInimigo = 0, idMoeda = 0;
 let escuro = 0.35, tremor = 0, tempo = 0, painelEm = 0;
 const novoJogador = (id, nome, cor) => ({
   id, nome, cor, x: 184, y: 300, r: 14, dir: 0, carrega: null, itens: [], vida: CFG.vidaMax, inv: 0, cdAtaque: 0, golpe: 0,
-  trabalhando: false, andando: false, caido: false, segurando: false, acaoSeq: 0, lampSeq: 0, compraSeq: 0, compraItem: '', velSeq: 0, pularSeq: 0,
+  trabalhando: false, andando: false, caido: false, segurando: false, acaoSeq: 0, lampSeq: 0, compraSeq: 0, compraItem: '', velSeq: 0,
 });
 const p = novoJogador('eu', lerNome(), CORES[0]);
 let jogadores = [p];
@@ -562,7 +575,7 @@ function ajustarAreas(n) {
     for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) covas.push({
       area: ai, x: a.x + 30 + c * 58, y: a.y + 80 + r * 150, w: 38, h: 64,
       prof: 0, corpo: null, fechada: false, fechar: 0, enfeite: null,
-      pago: false, gorjeta: false, levantou: false, levantarEm: null, enterradoEm: 0,
+      pago: false, gorjeta: false, levantou: false, levantarEm: null, enterradoEm: 0, estaca: false,
     });
   }
   while (dono.length < n) dono.push(false);
@@ -579,7 +592,7 @@ function novoJogo() {
   dia = 1; dinheiro = 0; nivelFerr = 0; nivelBota = 0; estoque = 0; relogio = CFG.duracaoDia; tipoFim = null;
   nivelProp = 0; nivelMochila = 0; nivelComb = { vida: 0, defesa: 0, ataque: 0, velAtaque: 0 }; ajudantes = []; lojaAba = 'equipamento';
   fila = [null, null, null, null]; lampioes = []; inimigos = []; flutuantes = []; agenda = []; torres = [];
-  evento = null; eventoHoje = null; tChefe = null; moedas = []; perigos = []; soltas = []; camX = 0; camY = 0;
+  evento = null; eventoHoje = null; tChefe = null; tNecro = null; moedas = []; perigos = []; soltas = []; camX = 0; camY = 0;
   AREAS = []; covas = []; dono = [true];
   ajustarAreas(areasVisiveis());
   meta = metaPara(jogadores.length);
@@ -598,15 +611,28 @@ const fatorVida = () => (1 + CFG.infinito.vidaPorDia) ** alemDo5();
 const danoExtra = () => Math.ceil(alemDo5() / CFG.infinito.chefeACada);
 const voltaDoChefe = () => (infinito ? Math.max(0, Math.floor(dia / CFG.infinito.chefeACada) - 1) : 0);
 
-function chegar(especie) {
+function chegar(especie, extra) {
   const i = fila.indexOf(null);
   if (i < 0) return false;
-  especie = especie || (Math.random() < CFG.chanceOgro ? 'ogro' : 'humano');
-  fila[i] = { id: ++idCorpo, especie, pedido: Math.random() < .5 ? 'rosa' : 'vela' };
+  especie = especie || (dia >= CFG.vampiro.desdeDia && Math.random() < CFG.vampiro.chance ? 'vampiro' : Math.random() < CFG.chanceOgro ? 'ogro' : 'humano');
+  fila[i] = Object.assign({ id: ++idCorpo, especie, pedido: Math.random() < .5 ? 'rosa' : 'vela' }, extra);
   return true;
 }
 
-const malResolvida = c => c.corpo && !c.levantou && !(c.fechada && c.enfeite === c.corpo.pedido);
+const malResolvida = c => c.corpo && !c.levantou && !(c.fechada && c.enfeite === c.corpo.pedido && (c.corpo.especie !== 'vampiro' || c.estaca));
+// Vampiro de cova aberta, de noite, morde os humanos das covas do lado (mesma fileira); ogro, goblin e o resto escapam
+const vizinhas = c => covas.filter(o => o !== c && o.area === c.area && o.y === c.y && Math.abs(o.x - c.x) < 70);
+function contagio() {
+  covas.forEach(c => {
+    if (!c.corpo || c.corpo.especie !== 'vampiro' || c.fechada || !dono[c.area]) return;
+    vizinhas(c).forEach(o => {
+      if (!o.corpo || o.corpo.especie !== 'humano' || o.levantou) return;
+      o.corpo = Object.assign({}, o.corpo, { especie: 'vampiro' }); o.estaca = false;
+      if (o.levantarEm == null) o.levantarEm = rnd(3, 10);
+      flutua(o.x, o.y - 44, 'Mordido!', COR.sangue); tocar('gemido', o.x, o.y);
+    });
+  });
+}
 const iluminada = c => lampioes.some(l => Math.hypot(l.x - c.x, l.y - c.y) < CFG.raioLampiao);
 
 // ===== Fluxo do jogo (sozinho ou anfitrião) =====
@@ -628,6 +654,8 @@ function comecarNoite() {
   const n = nLadroes(), passo = Math.min(8, 42 / n) / Math.max(1, jogadores.length * .75);
   agenda = Array.from({ length: n }, (_, i) => 2 + i * passo + rnd(0, 2)).sort((a, b) => a - b);
   tChefe = noiteDoChefe() ? CFG.chefe.chegaEm : null;
+  const cn = CFG.necromante;
+  tNecro = dia >= cn.desdeDia && !noiteDoChefe() && Math.random() < cn.chance ? rnd(5, 12) : null;
   covas.forEach(c => { if (malResolvida(c)) c.levantarEm = rnd(3, 10); });
   renderPainel();
   aviso('Anoiteceu.');
@@ -635,7 +663,7 @@ function comecarNoite() {
 
 function amanhecer() {
   inimigos.forEach(e => { if (e.tipo === 'zumbi') devolver(e); });
-  inimigos = []; perigos = []; tChefe = null;
+  inimigos = []; perigos = []; tChefe = null; tNecro = null;
   covas.forEach(c => { c.levantarEm = null; });
   jogadores.forEach(q => { q.vida = vidaMaxima(); q.inv = 0; q.caido = false; });
   ajudantes.forEach(a => { a.vida = CFG.ajudantes.vida; });
@@ -652,7 +680,7 @@ function amanhecer() {
 function liberarCovas() {
   covas.forEach(c => {
     if (!c.corpo || c.levantou || malResolvida(c) || dia - c.enterradoEm < CFG.liberaCova) return;
-    Object.assign(c, { prof: 0, corpo: null, fechada: false, fechar: 0, enfeite: null, pago: false, gorjeta: false, levantarEm: null, enterradoEm: 0 });
+    Object.assign(c, { prof: 0, corpo: null, fechada: false, fechar: 0, enfeite: null, pago: false, gorjeta: false, levantarEm: null, enterradoEm: 0, estaca: false });
   });
 }
 
@@ -976,21 +1004,12 @@ function alternarVelocidade(q) {
   velJogo = velJogo === 1 ? CFG.velocidadeRapida : 1;
   aviso(`${modo === 'solo' ? 'Velocidade' : q.nome + ' mudou a velocidade'}: ${velJogo === 1 ? 'normal' : String(velJogo).replace('.', ',') + 'x'}.`);
 }
-function pularNoite(q) {
-  if (estado !== 'noite') return;
-  aviso(modo === 'solo' ? 'Você pulou a noite.' : `${q.nome} pulou a noite.`);
-  amanhecer();
-}
 function pedirVelocidade() {
   if (modo === 'convidado') { p.velSeq++; enviarEntrada(true); } else alternarVelocidade(p);
 }
-function pedirPular() {
-  if (modo === 'convidado') { p.pularSeq++; enviarEntrada(true); } else pularNoite(p);
-}
-// os botões do HUD não pegam foco, senão o Espaço de cavar apertaria o botão
-['btn-vel', 'btn-pular'].forEach(id => $('#' + id).addEventListener('mousedown', e => e.preventDefault()));
+// o botão do HUD não pega foco, senão o Espaço de cavar apertaria o botão
+$('#btn-vel').addEventListener('mousedown', e => e.preventDefault());
 $('#btn-vel').addEventListener('click', () => { tocarLocal('clique'); pedirVelocidade(); });
-$('#btn-pular').addEventListener('click', () => { tocarLocal('clique'); pedirPular(); });
 $('#painel').addEventListener('input', e => {
   if (e.target.id === 'nome') { p.nome = limparNome(e.target.value); salvarNome(p.nome); }
   const k = e.target.dataset.vol;
@@ -1143,7 +1162,7 @@ function acaoPress(q) {
     // defunto vai no braço: os itens que sobrarem precisam caber na mochila
     if (c && !leva && q.itens.length <= capacidade() - 1) {
       q.carrega = { tipo: 'corpo', corpo: c }; fila[a.i] = null; tocar('pop', q.x, q.y);
-      aviso(c.especie === 'ogro' ? 'Ogro precisa de cova grande.' : 'Cova pequena serve.', q);
+      aviso(c.especie === 'ogro' ? 'Ogro precisa de cova grande.' : c.especie === 'vampiro' ? 'Vampiro: estaca antes de fechar.' : 'Cova pequena serve.', q);
     } else if (!c && leva) {
       fila[a.i] = leva.corpo; q.carrega = null; tocar('pop', q.x, q.y);
     } else if (c) {
@@ -1194,6 +1213,10 @@ function acaoPress(q) {
     }
     return;
   }
+  if (c.corpo && c.corpo.especie === 'vampiro' && !c.fechada && !c.estaca && q.itens.includes('estaca')) {
+    q.itens.splice(q.itens.indexOf('estaca'), 1); cravar(c);
+    return;
+  }
   if (q.itens.length && c.corpo && c.fechada && c.enfeite !== c.corpo.pedido) {
     const i = q.itens.indexOf(c.corpo.pedido);
     if (i >= 0) { q.itens.splice(i, 1); enfeitar(c, c.corpo.pedido); }
@@ -1205,6 +1228,16 @@ function acaoPress(q) {
 function enfeitar(c, item) {
   c.enfeite = item; c.gorjeta = true; tocar('pop', c.x, c.y);
   ganhar(CFG.gorjeta, c.x, c.y - 48);
+  // velório com pressa: enterrado e atendido no prazo, o enterro paga de novo
+  if (c.corpo.vip > 0) { c.corpo.vip = 0; ganhar(CFG.pagamento[c.corpo.especie], c.x, c.y - 72); }
+}
+function cravar(c) { c.estaca = true; tocar('baque', c.x, c.y); }
+// O prazo do defunto com pressa corre onde ele estiver: na carroça, no braço ou na cova
+function atualizarPressa(dt) {
+  const corpos = fila.filter(Boolean)
+    .concat(jogadores.concat(ajudantes).filter(o => o.carrega && o.carrega.tipo === 'corpo').map(o => o.carrega.corpo))
+    .concat(covas.filter(c => c.corpo).map(c => c.corpo));
+  corpos.forEach(c => { if (c.vip > 0) c.vip = Math.max(0, c.vip - dt); });
 }
 
 function segurar(q, dt, segura) {
@@ -1265,7 +1298,7 @@ function atacar(q, e) {
 function derrotar(e) {
   e.remover = true;
   if (e.tipo === 'zumbi') { devolver(e); flutua(e.x, e.y - 30, 'De volta pra cova', COR.osso); return; }
-  const trocado = e.tipo === 'chefe' ? CFG.moedas.chefe + (e.volta || 0) * CFG.chefe.cresce.moedas : CFG.moedas[e.especie === 'brutamontes' ? 'brutamontes' : 'ladrao'](dia);
+  const trocado = e.tipo === 'chefe' ? CFG.moedas.chefe + (e.volta || 0) * CFG.chefe.cresce.moedas : e.tipo === 'necro' ? CFG.necromante.moedas + dia : CFG.moedas[e.especie === 'brutamontes' ? 'brutamontes' : 'ladrao'](dia);
   soltarMoedas(e.x, e.y, trocado + e.saque, e.saque);
   if (e.tipo === 'chefe') {
     perigos = perigos.filter(h => h.tipo === 'estrepe' && h.t >= CFG.chefe.estrepes.voo);
@@ -1338,7 +1371,7 @@ function novoLadrao() {
 
 function levantar(c) {
   const z = CFG.zumbi[c.corpo.especie], vida = Math.round(z.vida * fatorVida());
-  c.levantou = true; c.fechada = false; c.fechar = 0; c.enfeite = null;
+  c.levantou = true; c.estaca = false; c.fechada = false; c.fechar = 0; c.enfeite = null;
   inimigos.push({ id: ++idInimigo, tipo: 'zumbi', especie: c.corpo.especie, x: c.x, y: c.y, r: z.r, vida, vidaMax: vida, vel: z.vel, dano: z.dano + danoExtra(), defesa: CFG.defesa(dia), cura: CFG.cura(dia), cova: c, cd: .8, flash: 0, dir: 0 });
   flutua(c.x, c.y - 44, 'Levantou!', COR.sangue); tocar('gemido', c.x, c.y);
   tremer(.2);
@@ -1386,6 +1419,7 @@ function atualizarInimigos(dt) {
     e.cd = Math.max(0, e.cd - dt); e.flash = Math.max(0, e.flash - dt);
     if (e.cura && e.vida < e.vidaMax) e.vida = Math.min(e.vidaMax, e.vida + e.cura * dt);
     if (e.tipo === 'chefe') { atualizarChefe(e, dt); continue; }
+    if (e.tipo === 'necro') { atualizarNecro(e, dt); continue; }
     if (e.tipo === 'zumbi') {
       const q = vitimaMaisPerto(e);
       if (!q) continue;
@@ -1445,6 +1479,9 @@ function pontoDeEspera(a) {
 }
 const covaServe = (c, corpo) => c && dono[c.area] && !c.corpo && !c.levantou && c.prof >= CFG.profundidade[corpo.especie];
 const covaPede = (c, item) => c && dono[c.area] && c.corpo && c.fechada && !c.levantou && c.enfeite !== c.corpo.pedido && (!item || c.corpo.pedido === item);
+const pedeEstaca = c => c && dono[c.area] && c.corpo && c.corpo.especie === 'vampiro' && !c.estaca && !c.fechada && !c.levantou;
+const precisa = (c, item) => (item === 'estaca' ? pedeEstaca(c) : covaPede(c, item));
+const podeFechar = c => c.corpo.especie !== 'vampiro' || c.estaca;
 const reservada = (c, a) => ajudantes.some(o => o !== a && o.tarefa && o.tarefa.cova === c);
 const maisPerto = (lista, ref) => lista.reduce((m, c) => (!m || dist(c, ref) < dist(m, ref) ? c : m), null);
 
@@ -1455,11 +1492,14 @@ function planejar(a) {
     return c ? { etapa: 'levar', cova: c } : fila.includes(null) ? { etapa: 'devolver' } : null;
   }
   if (a.carrega) {
-    const c = maisPerto(covas.filter(o => covaPede(o, a.carrega.item) && !reservada(o, a)), a);
+    const c = maisPerto(covas.filter(o => precisa(o, a.carrega.item) && !reservada(o, a)), a);
     if (!c) a.carrega = null; // ninguém mais quer: larga
     return c ? { etapa: 'enfeitar', cova: c } : null;
   }
   if (a.tipo === 'zelador') {
+    // estaca primeiro: vampiro de cova aberta é o que dá problema
+    const e = maisPerto(covas.filter(o => pedeEstaca(o) && !reservada(o, a)), ESTANDES[2]);
+    if (e) return { etapa: 'pegar', item: 'estaca', cova: e };
     const c = maisPerto(covas.filter(o => covaPede(o) && !reservada(o, a)), ESTANDES[0]);
     return c ? { etapa: 'pegar', item: c.corpo.pedido, cova: c } : null;
   }
@@ -1479,7 +1519,7 @@ function planejar(a) {
 // Goblin coveiro: fecha primeiro (é o que paga) e só cava o que os defuntos esperando vão precisar, mais uma de folga
 function planoCoveiro(a) {
   const minhas = covas.filter(o => dono[o.area] && !o.levantou && !reservada(o, a));
-  const aFechar = minhas.filter(o => o.corpo && !o.fechada);
+  const aFechar = minhas.filter(o => o.corpo && !o.fechada && podeFechar(o));
   if (aFechar.length) return { etapa: 'fechar', cova: maisPerto(aFechar, a) };
   const carregados = jogadores.concat(ajudantes).filter(o => o.carrega && o.carrega.tipo === 'corpo').map(o => o.carrega.corpo);
   const esperando = fila.filter(Boolean).concat(carregados);
@@ -1515,10 +1555,10 @@ function tarefaSegue(a) {
   if (t.etapa === 'buscar') return fila[t.slot] && fila[t.slot].id === t.id && covaServe(t.cova, fila[t.slot]);
   if (t.etapa === 'levar') return a.carrega && covaServe(t.cova, a.carrega.corpo);
   if (t.etapa === 'devolver') return a.carrega && fila.includes(null);
-  if (t.etapa === 'pegar') return covaPede(t.cova, t.item);
-  if (t.etapa === 'enfeitar') return a.carrega && covaPede(t.cova, a.carrega.item);
+  if (t.etapa === 'pegar') return precisa(t.cova, t.item);
+  if (t.etapa === 'enfeitar') return a.carrega && precisa(t.cova, a.carrega.item);
   if (t.etapa === 'cavar') return dono[t.cova.area] && !t.cova.corpo && !t.cova.levantou && t.cova.prof < t.alvo;
-  if (t.etapa === 'fechar') return t.cova.corpo && !t.cova.fechada && !t.cova.levantou;
+  if (t.etapa === 'fechar') return t.cova.corpo && !t.cova.fechada && !t.cova.levantou && podeFechar(t.cova);
   return false;
 }
 function destino(a) {
@@ -1544,7 +1584,8 @@ function concluir(a) {
     a.carrega = { tipo: 'item', item: t.item }; t.etapa = 'enfeitar';
     tocar('pop', a.x, a.y);
   } else if (t.etapa === 'enfeitar') {
-    enfeitar(t.cova, a.carrega.item); a.carrega = null; a.tarefa = null;
+    if (a.carrega.item === 'estaca') cravar(t.cova); else enfeitar(t.cova, a.carrega.item);
+    a.carrega = null; a.tarefa = null;
   }
 }
 function atualizarAjudantes(dt) {
@@ -1606,6 +1647,49 @@ function ferirTorre(t, d) {
   if (t.vida > 0) return;
   torres = torres.filter(o => o !== t);
   efeito('fumaca', t.x, t.y - 20); tocar('baque', t.x, t.y);
+}
+
+// ===== Necromante: fica longe, mira uma cova (ela brilha verde) e levanta o morto dela, mesmo de cova bem resolvida =====
+// O lugar de terreno seu mais longe dos coveiros
+function lugarLonge(e) {
+  const vivos = jogadores.filter(o => !o.caido), pts = [];
+  AREAS.forEach((a, i) => {
+    if (!dono[i]) return;
+    [[.1, .08], [.9, .08], [.1, .92], [.9, .92], [.5, .5]].forEach(([fx, fy]) => pts.push({ x: a.x + a.w * fx, y: a.y + a.h * fy }));
+  });
+  const perto = pt => Math.min(1e9, ...vivos.map(o => dist(o, pt)));
+  return pts.reduce((m, pt) => (!m || perto(pt) > perto(m) ? pt : m), null) || { x: e.x, y: e.y };
+}
+function novoNecro() {
+  const cf = CFG.necromante, vida = Math.round(cf.vida * fatorVida());
+  const e = { id: ++idInimigo, tipo: 'necro', especie: '', x: mundoW + 16, y: rnd(80, mundoH - 40), r: cf.r, vida, vidaMax: vida, vel: cf.vel,
+    defesa: CFG.defesa(dia), cura: CFG.cura(dia), estado: 'indo', prog: 0, saque: 0, cd: cf.intervalo / 2, flash: 0, dir: Math.PI, alvo: null };
+  e.destino = lugarLonge(e);
+  inimigos.push(e);
+  tocar('feitico', e.x, e.y);
+  aviso('Um necromante pulou o muro!');
+  flutua(e.x, e.y, 'Necromante!', COR.sangue);
+}
+function atualizarNecro(e, dt) {
+  const cf = CFG.necromante, q = coveiroMaisPerto(e);
+  if (e.estado === 'indo') {
+    if (andarAte(e, e.destino.x, e.destino.y, e.vel * dt)) e.estado = 'conjurando';
+    return;
+  }
+  // coveiro chegou perto: larga o feitiço e muda de lugar
+  if (q && dist(q, e) < cf.foge) { e.estado = 'indo'; e.alvo = null; e.destino = lugarLonge(e); e.cd = Math.max(e.cd, 1.5); return; }
+  if (e.estado === 'mirando') {
+    const c = e.alvo;
+    if (!c || !c.corpo || c.levantou) { e.estado = 'conjurando'; e.alvo = null; return; }
+    e.prog += dt / cf.aviso;
+    if (e.prog >= 1) { levantar(c); e.alvo = null; e.estado = 'conjurando'; e.cd = cf.intervalo; }
+    return;
+  }
+  if (e.cd > 0) return;
+  const alvo = maisPerto(covas.filter(c => dono[c.area] && c.corpo && !c.levantou), e);
+  if (!alvo) return;
+  e.alvo = alvo; e.estado = 'mirando'; e.prog = 0; e.dir = Math.atan2(alvo.y - e.y, alvo.x - e.x);
+  tocar('feitico', e.x, e.y);
 }
 
 // ===== Chefão: anda atrás do coveiro mais perto e alterna ataques que avisam antes =====
@@ -1738,6 +1822,23 @@ const EVENTOS = {
       return ev.frente > mundoW + 200;
     },
   },
+  chuva: {
+    aviso: 'Vai chover...',
+    comecar() { aviso('Chuva! A cova aberta enche.'); },
+    // cova aberta e vazia vai enchendo de água e perdendo o que foi cavado
+    passo(ev, dt) {
+      const cf = CFG.eventos.chuva;
+      covas.forEach(c => { if (dono[c.area] && !c.corpo && !c.levantou && c.prof > 0) c.prof = Math.max(0, c.prof - cf.enche * dt); });
+      return ev.t >= cf.dura;
+    },
+  },
+  velorio: {
+    aviso: 'Tem velório chegando...',
+    comecar() {
+      if (chegar('humano', { vip: CFG.eventos.velorio.prazo })) { aviso('Velório com pressa! Paga em dobro.'); flutua(96, 96, 'Chegou defunto', COR.osso); }
+    },
+    passo() { return true; },
+  },
 };
 
 function sortearEvento() {
@@ -1780,6 +1881,8 @@ function efeitoLocal(tipo, x, y, x2, y2) {
 function atualizarSoltas(dt) {
   const alvo = evento && evento.tipo === 'vento' ? (evento.etapa === 'ativo' ? 1 : .4) : 0;
   ventoVis += (alvo - ventoVis) * Math.min(1, dt * 1.5);
+  const alvoChuva = evento && evento.tipo === 'chuva' ? (evento.etapa === 'ativo' ? 1 : .25) : 0;
+  chuvaVis += (alvoChuva - chuvaVis) * Math.min(1, dt * 1.2);
   soltas.forEach(s => {
     s.t += dt;
     if (s.t < 0) return;
@@ -1866,6 +1969,7 @@ function atualizar(dt) {
   mover(dt);
   jogadores.forEach(q => segurar(q, dt, q === p ? segurando() : q.segurando));
   atualizarMoedas(dt);
+  atualizarPressa(dt);
   atualizarAjudantes(dt);
 
   if (estado === 'dia') {
@@ -1882,6 +1986,8 @@ function atualizar(dt) {
   tNoite += dt;
   while (agenda.length && agenda[0] <= tNoite) { agenda.shift(); novoLadrao(); }
   if (tChefe != null && tNoite >= tChefe) { tChefe = null; novoChefe(); }
+  if (tNecro != null && tNoite >= tNecro) { tNecro = null; novoNecro(); }
+  contagio();
   covas.forEach(c => {
     if (c.levantarEm == null) return;
     c.levantarEm -= dt;
@@ -1892,7 +1998,7 @@ function atualizar(dt) {
   atualizarTorres(dt);
   atualizarPerigos(dt);
   if (estado !== 'noite') return;
-  const limpa = !agenda.length && tChefe == null && !inimigos.length && !covas.some(c => c.levantarEm != null);
+  const limpa = !agenda.length && tChefe == null && tNecro == null && !inimigos.length && !covas.some(c => c.levantarEm != null);
   if (limpa && tLimpa === 0) aviso('Cemitério limpo. Já vai amanhecer.');
   tLimpa = limpa ? tLimpa + dt : 0;
   if (tLimpa >= 1.5 || relogio <= 0) amanhecer();
@@ -2012,8 +2118,6 @@ function receberDoConvidado(id, d) {
     if (estado === 'loja' && Object.prototype.hasOwnProperty.call(ITENS_LOJA, d.c[1])) comprar(d.c[1], q);
   }
   if (Number.isInteger(d.v) && d.v > q.velSeq) { q.velSeq = d.v; alternarVelocidade(q); }
-  if (Number.isInteger(d.pn) && d.pn > q.pularSeq) { q.pularSeq = d.pn; pularNoite(q);
-  }
 }
 
 const r2 = v => Math.round(v * 100) / 100;
@@ -2027,9 +2131,9 @@ function fotoMundo() {
     moedas: moedas.map(m => [m.id, Math.round(m.x), Math.round(m.y), Math.round(m.ox), Math.round(m.oy), r2(m.t)]),
     perigos: perigos.map(h => [h.tipo, Math.round(h.x), Math.round(h.y), Math.round(h.ox), Math.round(h.oy), r2(h.t), r2(h.dur)]),
     covas: covas.map(c => (c.prof || c.corpo)
-      ? [r2(c.prof), c.corpo, c.fechada ? 1 : 0, r2(c.fechar), c.enfeite, c.levantou ? 1 : 0, c.levantarEm != null && c.levantarEm < 2.2 ? 1 : 0, c.pago ? 1 : 0]
+      ? [r2(c.prof), c.corpo, c.fechada ? 1 : 0, r2(c.fechar), c.enfeite, c.levantou ? 1 : 0, c.levantarEm != null && c.levantarEm < 2.2 ? 1 : 0, c.pago ? 1 : 0, c.estaca ? 1 : 0]
       : 0),
-    inimigos: inimigos.filter(e => !e.remover).map(e => [e.id, e.tipo, e.especie || '', Math.round(e.x), Math.round(e.y), e.r, r2(e.vida), e.estado || '', r2(e.prog || 0), e.saque || 0, r2(e.dir), e.flash > 0 ? 1 : 0, r2(e.vidaMax || e.vida)]),
+    inimigos: inimigos.filter(e => !e.remover).map(e => [e.id, e.tipo, e.especie || '', Math.round(e.x), Math.round(e.y), e.r, r2(e.vida), e.estado || '', r2(e.prog || 0), e.saque || 0, r2(e.dir), e.flash > 0 ? 1 : 0, r2(e.vidaMax || e.vida), e.tipo === 'necro' && e.alvo ? covas.indexOf(e.alvo) : -1]),
     jogadores: jogadores.map(q => [q.id, q.nome, q.cor, Math.round(q.x), Math.round(q.y), r2(q.dir), q.carrega, q.vida, q.caido ? 1 : 0, q.golpe > 0 ? 1 : 0, q.trabalhando ? 1 : 0, q.andando ? 1 : 0, q.inv > 0 ? 1 : 0, q.itens]),
     ev: eventos,
   };
@@ -2089,7 +2193,7 @@ function enviarEntrada(ja) {
   if (!ja && agora - ultimoEnvio < 50) return;
   ultimoEnvio = agora;
   try {
-    conexaoAnfitriao.send({ t: 'in', k: ++seqEntrada, n: p.nome, x: Math.round(p.x), y: Math.round(p.y), dir: r2(p.dir), an: p.andando ? 1 : 0, seg: segurando() ? 1 : 0, a: p.acaoSeq, l: p.lampSeq, c: [p.compraSeq, p.compraItem], v: p.velSeq, pn: p.pularSeq });
+    conexaoAnfitriao.send({ t: 'in', k: ++seqEntrada, n: p.nome, x: Math.round(p.x), y: Math.round(p.y), dir: r2(p.dir), an: p.andando ? 1 : 0, seg: segurando() ? 1 : 0, a: p.acaoSeq, l: p.lampSeq, c: [p.compraSeq, p.compraItem], v: p.velSeq });
   } catch (e) { /* conexão caindo */ }
 }
 
@@ -2118,13 +2222,13 @@ function aplicarMundo(m) {
   m.covas.forEach((v, i) => {
     const c = covas[i];
     if (!c) return;
-    if (!v) { Object.assign(c, { prof: 0, corpo: null, fechada: false, fechar: 0, enfeite: null, levantou: false, levantarEm: null, pago: false }); return; }
-    Object.assign(c, { prof: v[0], corpo: v[1], fechada: !!v[2], fechar: v[3], enfeite: v[4], levantou: !!v[5], levantarEm: v[6] ? 1 : null, pago: !!v[7] });
+    if (!v) { Object.assign(c, { prof: 0, corpo: null, fechada: false, fechar: 0, enfeite: null, levantou: false, levantarEm: null, pago: false, estaca: false }); return; }
+    Object.assign(c, { prof: v[0], corpo: v[1], fechada: !!v[2], fechar: v[3], enfeite: v[4], levantou: !!v[5], levantarEm: v[6] ? 1 : null, pago: !!v[7], estaca: !!v[8] });
   });
   const velhos = new Map(inimigos.map(e => [e.id, e]));
   inimigos = m.inimigos.map(v => {
     const e = velhos.get(v[0]) || { x: v[3], y: v[4] };
-    return Object.assign(e, { id: v[0], tipo: v[1], especie: v[2], alvoX: v[3], alvoY: v[4], r: v[5], vida: v[6], estado: v[7], prog: v[8], saque: v[9], dir: v[10], flash: v[11] ? .1 : 0, vidaMax: v[12] || v[6] });
+    return Object.assign(e, { id: v[0], tipo: v[1], especie: v[2], alvoX: v[3], alvoY: v[4], r: v[5], vida: v[6], estado: v[7], prog: v[8], saque: v[9], dir: v[10], flash: v[11] ? .1 : 0, vidaMax: v[12] || v[6], alvoC: v[13] >= 0 ? covas[v[13]] : null });
   });
   const velhosJ = new Map(jogadores.map(q => [q.id, q]));
   const comecou = (antes === 'sala' || antes === 'fim') && estado === 'dia';
@@ -2307,17 +2411,17 @@ function desenharVela(x, y, s = 1, apagada = false) {
 }
 
 function desenharCorpo(x, y, especie, ang = 0, s = 1) {
-  const og = especie === 'ogro', gob = especie === 'goblin', w = (og ? 80 : gob ? 48 : 64) * s, h = (og ? 30 : gob ? 18 : 22) * s;
+  const og = especie === 'ogro', gob = especie === 'goblin', vamp = especie === 'vampiro', w = (og ? 80 : gob ? 48 : 64) * s, h = (og ? 30 : gob ? 18 : 22) * s;
   ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
   rr(-w / 2 + 3, -h / 2 + 4, w, h, h / 2); ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fill();
-  rr(-w / 2, -h / 2, w, h, h / 2); ctx.fillStyle = COR.mortalha; ctx.fill(); contorno(2.2);
+  rr(-w / 2, -h / 2, w, h, h / 2); ctx.fillStyle = vamp ? CAPA_VAMPIRO : COR.mortalha; ctx.fill(); contorno(2.2);
   ctx.strokeStyle = 'rgba(22,19,28,.35)'; ctx.lineWidth = 1.5;
   for (let i = 1; i <= 3; i++) {
     const bx = -w / 2 + w * (.28 + i * .17);
     ctx.beginPath(); ctx.moveTo(bx, -h / 2 + 2); ctx.lineTo(bx - 4 * s, h / 2 - 2); ctx.stroke();
   }
   const rx = -w / 2 + h * .55, rr_ = h * .38;
-  circulo(rx, 0, rr_); ctx.fillStyle = og ? '#8aa65e' : gob ? PELE_GOBLIN : '#dcc7a4'; ctx.fill(); contorno(1.8);
+  circulo(rx, 0, rr_); ctx.fillStyle = og ? '#8aa65e' : gob ? PELE_GOBLIN : vamp ? PELE_VAMPIRO : '#dcc7a4'; ctx.fill(); contorno(1.8);
   ctx.strokeStyle = COR.tinta; ctx.lineWidth = 1.3;
   [-1, 1].forEach(sg => {
     const ex = rx + rr_ * .25, ey = sg * rr_ * .42, k = rr_ * .22;
@@ -2327,15 +2431,30 @@ function desenharCorpo(x, y, especie, ang = 0, s = 1) {
     ctx.fillStyle = COR.osso;
     [-1, 1].forEach(sg => { ctx.beginPath(); ctx.moveTo(rx + rr_ * .7, sg * rr_ * .25); ctx.lineTo(rx + rr_ * 1.25, sg * rr_ * .35); ctx.lineTo(rx + rr_ * .7, sg * rr_ * .55); ctx.closePath(); ctx.fill(); });
   }
+  if (vamp) { // gola vermelha da capa
+    ctx.strokeStyle = COR.sangue; ctx.lineWidth = 2.2 * s;
+    ctx.beginPath(); ctx.moveTo(rx + rr_ + 2 * s, -h / 2 + 2 * s); ctx.lineTo(rx + rr_ + 2 * s, h / 2 - 2 * s); ctx.stroke();
+  }
   ctx.restore();
 }
+const CAPA_VAMPIRO = '#2e2233', PELE_VAMPIRO = '#d9d4e4';
 
-function balao(x, y, item) {
+// Balão do pedido. O defunto com pressa tem balão dourado com o prazo correndo em volta
+function balao(x, y, item, pressa) {
   y += Math.sin(tempo * 3 + x) * 1.5;
-  ctx.fillStyle = COR.osso;
+  ctx.fillStyle = pressa != null ? '#f6d98a' : COR.osso;
   ctx.beginPath(); ctx.moveTo(x - 5, y - 6); ctx.lineTo(x - 8, y + 3); ctx.lineTo(x + 2, y - 6); ctx.closePath(); ctx.fill(); contorno(2);
   rr(x - 12, y - 28, 24, 23, 7); ctx.fill(); contorno(2);
-  if (item === 'rosa') desenharRosa(x, y - 18, .85); else desenharVela(x, y - 14, .8);
+  if (item === 'rosa') desenharRosa(x, y - 18, .85); else if (item === 'vela') desenharVela(x, y - 14, .8); else desenharEstaca(x, y - 16, .9);
+  if (pressa != null) {
+    ctx.strokeStyle = COR.tinta; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(x, y - 16.5, 17, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = COR.ambar; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y - 16.5, 17, -Math.PI / 2, -Math.PI / 2 + TAU * pressa); ctx.stroke();
+  }
+}
+const balaoDe = (x, y, corpo, item = corpo.pedido) => balao(x, y, item, corpo.vip > 0 ? corpo.vip / CFG.eventos.velorio.prazo : null);
+function desenharEstaca(x, y, s = 1) {
+  ctx.beginPath(); ctx.moveTo(x - 2.6 * s, y - 8 * s); ctx.lineTo(x + 2.6 * s, y - 8 * s); ctx.lineTo(x + 2.6 * s, y + 4 * s); ctx.lineTo(x, y + 9 * s); ctx.lineTo(x - 2.6 * s, y + 4 * s); ctx.closePath();
+  ctx.fillStyle = '#a8773f'; ctx.fill(); contorno(1.4);
 }
 
 function desenharCova(c) {
@@ -2357,6 +2476,7 @@ function desenharCova(c) {
     ctx.fillStyle = og ? COR.pedraOgro : COR.pedra; ctx.fill(); contorno(2.5);
     ctx.strokeStyle = 'rgba(22,19,28,.55)'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(x, t - 10); ctx.lineTo(x, t + 8); ctx.moveTo(x - 5, t - 4); ctx.lineTo(x + 5, t - 4); ctx.stroke();
+    if (c.estaca) desenharEstaca(x + 12, y + 6, 1.1);
     if (c.enfeite === 'rosa') desenharRosa(x, y + c.h / 2 - 14, 1.1);
     else if (c.enfeite === 'vela') desenharVela(x, y + c.h / 2 - 12, 1.1);
     else if (c.enfeite === 'apagada') desenharVela(x, y + c.h / 2 - 12, 1.1, true);
@@ -2366,9 +2486,11 @@ function desenharCova(c) {
   const hw = c.w * (.5 + .5 * k), hh = c.h * (.5 + .5 * k);
   rr(x - hw / 2, y - hh / 2, hw, hh, 5);
   ctx.fillStyle = COR.buraco[c.prof >= 2 ? 2 : c.prof >= 1 ? 1 : 0]; ctx.fill(); contorno(2.5);
+  if (!c.corpo && chuvaVis > .05) { rr(x - hw / 2 + 3, y - hh / 2 + 3, hw - 6, hh - 6, 4); ctx.fillStyle = `rgba(90,140,190,${.55 * chuvaVis})`; ctx.fill(); }
   if (c.corpo && !c.levantou) {
     const og = c.corpo.especie === 'ogro';
     desenharCorpo(x, y, c.corpo.especie, Math.PI / 2, og ? .76 : .84);
+    if (c.estaca) desenharEstaca(x, y + 2, 1.2);
     if (c.fechar > 0) {
       rr(x - hw / 2, y - hh / 2, hw, hh, 5);
       ctx.fillStyle = `rgba(110,74,43,${Math.min(1, c.fechar * 1.1)})`; ctx.fill();
@@ -2406,6 +2528,10 @@ function desenharEstandes() {
   ctx.beginPath(); ctx.moveTo(v.x - 20, v.y + 3); ctx.lineTo(v.x + 20, v.y + 3); ctx.stroke();
   [-11, 0, 11].forEach(dx => desenharVela(v.x + dx, v.y - 8, 1));
   texto('Velas', v.x, v.y + 30, 12, COR.osso, 600);
+  const e = ESTANDES[2];
+  [-9, 0, 9].forEach(dx => desenharEstaca(e.x + dx, e.y - 12, 1.15));
+  rr(e.x - 18, e.y - 6, 36, 24, 4); ctx.fillStyle = COR.madeiraEsc; ctx.fill(); contorno(2.5);
+  texto('Estacas', e.x, e.y + 30, 12, COR.osso, 600);
 }
 
 // Base vazia: um círculo de pedra na trilha
@@ -2440,7 +2566,7 @@ function desenharTorreMini(x, y, s) {
   rr(x - 5 * s, y - 7.5 * s, 10 * s, 3.5 * s, 1 * s); ctx.fillStyle = COR.madeiraEsc; ctx.fill(); contorno(1.3);
 }
 function desenharItem(it, x, y, s) {
-  if (it === 'rosa') desenharRosa(x, y, s); else if (it === 'vela') desenharVela(x, y, s); else desenharTorreMini(x, y, s);
+  if (it === 'rosa') desenharRosa(x, y, s); else if (it === 'vela') desenharVela(x, y, s); else if (it === 'estaca') desenharEstaca(x, y, s); else desenharTorreMini(x, y, s);
 }
 
 function desenharLampiao(l) {
@@ -2502,6 +2628,17 @@ function desenharCoveiro(q) {
   if (nivel === 3) desenharEscavadeira(q);
   const balanco = q.trabalhando ? Math.sin(tempo * 14) * .6 : 0;
   if (nivel === 1 || nivel === 2) desenharFerramenta(x, y + bob, q.dir + .9 + balanco, nivel);
+  const leva = q.carrega, itens = q.itens || [];
+  // mochila nas costas com o que não cabe na mão. De lado e de frente fica atrás do corpo; de costas pra tela, por cima
+  const naMao = leva ? null : itens[0], nasCostas = leva ? itens : itens.slice(1);
+  const deCostas = Math.sin(q.dir) < -.5;
+  const mochila = () => {
+    const bx = x - Math.cos(q.dir) * 15, by = y + (deCostas ? 3 : -2) + bob;
+    rr(bx - 8, by - 8, 16, 15, 4); ctx.fillStyle = '#7a5230'; ctx.fill(); contorno(2);
+    nasCostas.forEach((it, i) => desenharItem(it, bx - 5 + i * 5, by - 10, .7));
+  };
+  const temMochila = nivelMochila > 0 || nasCostas.length;
+  if (temMochila && !deCostas) mochila();
   ctx.beginPath(); ctx.ellipse(x, y + 2 + bob * .3, 13, 12, 0, 0, TAU); ctx.fillStyle = corSegura(q.cor); ctx.fill(); contorno(2.5);
   const hx = x + Math.cos(q.dir) * 2, hy = y - 7 + bob;
   circulo(hx, hy, 8.5); ctx.fillStyle = '#e8c49a'; ctx.fill(); contorno(2.2);
@@ -2511,14 +2648,7 @@ function desenharCoveiro(q) {
   circulo(hx + 3 + ox, hy + 2, 1.3); ctx.fill();
   ctx.beginPath(); ctx.ellipse(hx, hy - 4, 12, 4.5, 0, 0, TAU); ctx.fillStyle = '#231e2b'; ctx.fill(); contorno(2);
   rr(hx - 6.5, hy - 14, 13, 10, 3); ctx.fillStyle = '#231e2b'; ctx.fill(); contorno(2);
-  const leva = q.carrega, itens = q.itens || [];
-  // mochila nas costas com o que não cabe na mão
-  const naMao = leva ? null : itens[0], nasCostas = leva ? itens : itens.slice(1);
-  if (nivelMochila > 0 || nasCostas.length) {
-    const bx = x - Math.cos(q.dir) * 11, by = y - 1 + bob;
-    rr(bx - 8, by - 8, 16, 15, 4); ctx.fillStyle = '#7a5230'; ctx.fill(); contorno(2);
-    nasCostas.forEach((it, i) => desenharItem(it, bx - 5 + i * 5, by - 10, .7));
-  }
+  if (temMochila && deCostas) mochila();
   if (leva && leva.tipo === 'corpo') desenharCorpo(x, y - 28 + bob, leva.corpo.especie, 0, .72);
   else if (naMao) {
     const ix = x + Math.cos(q.dir) * 16, iy = y + Math.sin(q.dir) * 10 + 2;
@@ -2562,14 +2692,14 @@ function desenharAjudante(a) {
   if (leva && leva.tipo === 'corpo') desenharCorpo(x, y - 22 + bob, leva.corpo.especie, 0, .56);
   else if (leva && leva.tipo === 'item') {
     const ix = x + Math.cos(a.dir) * 11, iy = y + Math.sin(a.dir) * 7 + 3;
-    if (leva.item === 'rosa') desenharRosa(ix, iy, .9); else desenharVela(ix, iy, .9);
+    desenharItem(leva.item, ix, iy, .9);
   }
   ctx.restore();
 }
 
 function desenharZumbi(e) {
   const og = e.especie === 'ogro', r = e.r, sway = Math.sin(tempo * 6 + e.x * .1) * 1.5;
-  const pele = og ? '#6f8f4c' : e.especie === 'goblin' ? PELE_GOBLIN : '#8aa47a';
+  const vamp = e.especie === 'vampiro', pele = og ? '#6f8f4c' : e.especie === 'goblin' ? PELE_GOBLIN : vamp ? PELE_VAMPIRO : '#8aa47a';
   sombra(e.x, e.y + r * .9, r, r * .35);
   ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(e.dir); ctx.lineCap = 'round';
   [[og ? 9 : 7, COR.tinta], [og ? 6 : 4.5, pele]].forEach(([lw, cor]) => {
@@ -2577,18 +2707,20 @@ function desenharZumbi(e) {
     [-1, 1].forEach(sg => { ctx.beginPath(); ctx.moveTo(0, sg * r * .55); ctx.lineTo(r + 9, sg * r * .5 + sway); ctx.stroke(); });
   });
   ctx.restore();
-  circulo(e.x, e.y, r); ctx.fillStyle = COR.mortalha; ctx.fill(); contorno(2.5);
+  circulo(e.x, e.y, r); ctx.fillStyle = vamp ? CAPA_VAMPIRO : COR.mortalha; ctx.fill(); contorno(2.5);
+  if (vamp) { ctx.strokeStyle = COR.sangue; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(e.x, e.y - r * .1, r * .72, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke(); }
   ctx.strokeStyle = 'rgba(22,19,28,.35)'; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(e.x - r * .7, e.y + r * .2); ctx.lineTo(e.x + r * .6, e.y + r * .5); ctx.stroke();
   const hx = e.x + Math.cos(e.dir) * r * .25, hy = e.y - r * .35;
   circulo(hx, hy, r * .62); ctx.fillStyle = pele; ctx.fill(); contorno(2.2);
-  ctx.fillStyle = '#e9e36a';
+  ctx.fillStyle = vamp ? COR.sangue : '#e9e36a';
   const ox = Math.cos(e.dir) * r * .15;
   circulo(hx - r * .22 + ox, hy + r * .05, og ? 2.6 : 2); ctx.fill();
   circulo(hx + r * .22 + ox, hy + r * .05, og ? 2.6 : 2); ctx.fill();
-  if (og) {
+  if (og || vamp) { // presas: do ogro pra cima, do vampiro pra baixo
     ctx.fillStyle = COR.osso;
-    [-1, 1].forEach(sg => { ctx.beginPath(); ctx.moveTo(hx + sg * r * .2, hy + r * .3); ctx.lineTo(hx + sg * r * .28, hy + r * .62); ctx.lineTo(hx + sg * r * .08, hy + r * .36); ctx.closePath(); ctx.fill(); });
+    if (og) [-1, 1].forEach(sg => { ctx.beginPath(); ctx.moveTo(hx + sg * r * .2, hy + r * .3); ctx.lineTo(hx + sg * r * .28, hy + r * .62); ctx.lineTo(hx + sg * r * .08, hy + r * .36); ctx.closePath(); ctx.fill(); });
+    else [-1, 1].forEach(sg => { ctx.beginPath(); ctx.moveTo(hx + sg * r * .14 - 1.4, hy + r * .32); ctx.lineTo(hx + sg * r * .14 + 1.4, hy + r * .32); ctx.lineTo(hx + sg * r * .14, hy + r * .6); ctx.closePath(); ctx.fill(); });
   }
   if (e.flash > 0) { circulo(e.x, e.y, r + 2); ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fill(); }
 }
@@ -2655,6 +2787,36 @@ function desenharChefe(e) {
     }
   }
   if (e.flash > 0) { circulo(x, y, r + 2); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.fill(); }
+}
+
+// Necromante: manto roxo de capuz, olhos verdes e um cajado com uma bola verde que acende quando ele conjura
+function desenharNecro(e) {
+  const r = e.r, x = e.x, y = e.y, brilho = e.estado === 'mirando' ? .7 + .3 * Math.sin(tempo * 20) : .4;
+  sombra(x, y + r * .9, r, r * .35);
+  const sx = x + 13, sy = y - 4;
+  ctx.strokeStyle = COR.madeiraEsc; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(sx, sy + 16); ctx.lineTo(sx, sy - 18); ctx.stroke();
+  circulo(sx, sy - 22, 5); ctx.fillStyle = `rgba(143,211,106,${brilho})`; ctx.fill(); contorno(1.6);
+  ctx.beginPath(); ctx.moveTo(x - r, y + r * .8); ctx.quadraticCurveTo(x - r * 1.1, y - r * .6, x, y - r * 1.4);
+  ctx.quadraticCurveTo(x + r * 1.1, y - r * .6, x + r, y + r * .8); ctx.closePath();
+  ctx.fillStyle = '#3a2a55'; ctx.fill(); contorno(2.5);
+  const hx = x + Math.cos(e.dir) * 2, hy = y - r * .45;
+  circulo(hx, hy, r * .45); ctx.fillStyle = '#1b1422'; ctx.fill();
+  ctx.fillStyle = '#9be37a';
+  circulo(hx - 3, hy, 1.6); ctx.fill(); circulo(hx + 3, hy, 1.6); ctx.fill();
+  if (e.flash > 0) { circulo(x, y, r + 2); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.fill(); }
+}
+// A cova que o necromante mira brilha verde e um fio verde liga os dois
+function desenharAvisosNecro() {
+  inimigos.forEach(e => {
+    const c = e.alvoC || e.alvo;
+    if (e.tipo !== 'necro' || e.estado !== 'mirando' || !c) return;
+    const k = Math.min(1, e.prog || 0);
+    rr(c.x - c.w / 2 - 6, c.y - c.h / 2 - 6, c.w + 12, c.h + 12, 9); ctx.fillStyle = `rgba(143,211,106,${.12 + .3 * k})`; ctx.fill();
+    ctx.strokeStyle = 'rgba(143,211,106,.9)'; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.setLineDash([6, 6]); ctx.lineDashOffset = -tempo * 60;
+    ctx.beginPath(); ctx.moveTo(e.x + 13, e.y - 26); ctx.lineTo(c.x, c.y); ctx.stroke(); ctx.setLineDash([]);
+  });
 }
 
 // Avisos dos ataques do chefe e os perigos no chão. Ficam por cima do escuro para dar para ver chegando
@@ -2749,6 +2911,22 @@ function desenharSoltas() {
   });
 }
 
+// Chuva: riscos caindo na tela, mais uma sombra por cima
+function desenharChuva() {
+  if (chuvaVis < .02) return;
+  const n = Math.round((config.leve || reduzMov ? 60 : 140) * chuvaVis);
+  ctx.fillStyle = `rgba(30,40,60,${.2 * chuvaVis})`; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = `rgba(190,210,235,${.5 * chuvaVis})`; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const vel = 650 + (i * 37) % 300;
+    const x = (((i * 173.3 - tempo * vel * .25) % (W + 100)) + W + 100) % (W + 100) - 50;
+    const y = ((i * 91.7 + tempo * vel) % (H + 40)) - 20;
+    ctx.moveTo(x, y); ctx.lineTo(x - 4, y + 14);
+  }
+  ctx.stroke();
+}
+
 // Rajadas e folhas: desenhadas na tela, por cima de tudo
 function desenharVento() {
   if (!rajadas.length && !folhas.length) return;
@@ -2824,6 +3002,7 @@ function desenharEscuro() {
   lampioes.forEach(l => { if (naTela(l.y, 140)) furo(l.x, l.y - 12, CFG.raioLampiao + 22, 1); });
   covas.forEach(c => { if (c.fechada && c.enfeite === 'vela' && naTela(c.y)) furo(c.x, c.y + c.h / 2 - 20, 42, .8); });
   furo(ESTANDES[1].x, ESTANDES[1].y - 8, 46, .8);
+  inimigos.forEach(e => { if (e.tipo === 'necro') furo(e.x + 13, e.y - 26, 44, .6); });
   lg.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(luz, 0, 0, W, H);
   if (escuro > .3 && !config.leve) {
@@ -2876,7 +3055,7 @@ function desenhar() {
   const alvo = jogando && !p.caido ? alvoAtual(p) : null;
   if (alvo) desenharAlvo(alvo);
   lampioes.forEach(l => { if (naTela(l.y)) desenharLampiao(l); });
-  const ents = inimigos.map(e => ({ y: e.y, f: () => (e.tipo === 'zumbi' ? desenharZumbi(e) : e.tipo === 'chefe' ? desenharChefe(e) : desenharLadrao(e)) }));
+  const ents = inimigos.map(e => ({ y: e.y, f: () => (e.tipo === 'zumbi' ? desenharZumbi(e) : e.tipo === 'chefe' ? desenharChefe(e) : e.tipo === 'necro' ? desenharNecro(e) : desenharLadrao(e)) }));
   jogadores.forEach(q => ents.push({ y: q.y, f: () => desenharCoveiro(q) }));
   ajudantes.forEach(a => { if (naTela(a.y)) ents.push({ y: a.y, f: () => desenharAjudante(a) }); });
   torres.forEach(t => { if (naTela(t.y)) ents.push({ y: t.y, f: () => desenharTorre(t) }); });
@@ -2889,13 +3068,16 @@ function desenhar() {
   // Por cima do escuro: pedidos, avisos, barras e números
   ctx.save(); ctx.translate(-camDX, -camDY);
   desenharAvisosChefe();
-  fila.forEach((c, i) => { if (c) balao(SLOTS[i].x + 44, SLOTS[i].y - 4, c.pedido); });
-  jogadores.forEach(q => { if (!q.caido && q.carrega && q.carrega.tipo === 'corpo') balao(q.x + 30, q.y - 36, q.carrega.corpo.pedido); });
+  desenharAvisosNecro();
+  fila.forEach((c, i) => { if (c) balaoDe(SLOTS[i].x + 44, SLOTS[i].y - 4, c); });
+  jogadores.forEach(q => { if (!q.caido && q.carrega && q.carrega.tipo === 'corpo') balaoDe(q.x + 30, q.y - 36, q.carrega.corpo); });
   if (modo !== 'solo') jogadores.forEach(q => { if (q !== p) texto(q.nome, q.x, q.y + 27, 11, COR.osso, 600); });
   covas.forEach(c => {
-    if (!dono[c.area] || !c.corpo || c.levantou || c.enfeite === c.corpo.pedido || !naTela(c.y)) return;
-    balao(c.x + 22, c.y - c.h / 2 - 2, c.corpo.pedido);
+    if (!dono[c.area] || !c.corpo || c.levantou || !naTela(c.y)) return;
     if (c.levantarEm != null && c.levantarEm < 2.2) texto('!', c.x - 16, c.y - c.h / 2 - 12, 22, COR.sangue, 700);
+    // vampiro de cova aberta pede a estaca antes de tudo
+    if (pedeEstaca(c)) balaoDe(c.x + 22, c.y - c.h / 2 - 2, c.corpo, 'estaca');
+    else if (c.enfeite !== c.corpo.pedido) balaoDe(c.x + 22, c.y - c.h / 2 - 2, c.corpo);
   });
   if (alvo && alvo.tipo === 'cova') {
     const c = alvo.cova, by = c.y + c.h / 2 + 10;
@@ -2922,6 +3104,7 @@ function desenhar() {
   ctx.restore();
 
   // Na tela
+  desenharChuva();
   desenharVento();
   desenharSetas();
   barraChefe();
@@ -2954,7 +3137,6 @@ function atualizarHUD() {
   pinta('hud-vida', 'innerHTML', v);
   pinta('btn-vel', 'textContent', velJogo === 1 ? '1x' : String(velJogo).replace('.', ',') + 'x');
   pinta('btn-vel', 'className', 'hud-btn' + (velJogo === 1 ? '' : ' ligado'));
-  pinta('btn-pular', 'hidden', fase !== 'noite');
   pinta('hud-ferramenta', 'textContent', ferramenta().nome);
   pinta('hud-bota', 'hidden', nivelBota === 0);
   pinta('hud-bota', 'textContent', bota().nome);
