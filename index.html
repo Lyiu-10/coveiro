@@ -220,6 +220,7 @@ const CFG = {
     tempoAcao: 1.4,   // segundos pra pegar ou largar qualquer coisa
     carregador: { nome: 'Goblin carregador', preco: 40, desc: 'leva defunto pra cova' },
     zelador: { nome: 'Goblin zelador', preco: 30, desc: 'põe rosa e vela' },
+    coveiro: { nome: 'Goblin coveiro', preco: 50, desc: 'cava e fecha cova', cava: 1 }, // cava: ritmo, 1 = coveiro de mãos
   },
   // Bichos da noite: poucos no começo, muitos no fim, e a cada dia com mais defesa e mais cura
   ladroes: d => Math.max(1, Math.round(0.25 * d * d + 0.75)), // 1, 2, 3, 5, 7
@@ -639,6 +640,7 @@ const ITENS_LOJA = {
   propaganda: { preco: () => (CFG.propaganda[nivelProp + 1] || {}).preco, levar: () => { nivelProp++; } },
   carregador: { preco: () => (contarAjudantes('carregador') < CFG.ajudantes.maxPorTipo ? CFG.ajudantes.carregador.preco : null), levar: () => contratar('carregador') },
   zelador: { preco: () => (contarAjudantes('zelador') < CFG.ajudantes.maxPorTipo ? CFG.ajudantes.zelador.preco : null), levar: () => contratar('zelador') },
+  coveiro: { preco: () => (contarAjudantes('coveiro') < CFG.ajudantes.maxPorTipo ? CFG.ajudantes.coveiro.preco : null), levar: () => contratar('coveiro') },
 };
 Object.keys(CFG.combate).forEach(k => {
   ITENS_LOJA[k] = {
@@ -826,6 +828,7 @@ function mostrarLoja() {
     cemiterio: () => [
       nivelado('propaganda', 'Propaganda', CFG.propaganda, nivelProp),
       ajudante('carregador'),
+      ajudante('coveiro'),
       ajudante('zelador'),
     ],
     combate: () => Object.entries(CFG.combate).map(([k, c]) =>
@@ -1164,11 +1167,7 @@ function segurar(q, dt, segura) {
   if (c.corpo && !c.fechada) {
     c.fechar = Math.min(1, c.fechar + CFG.fecharPorSeg * f.cavar * dt);
     q.trabalhando = true;
-    if (c.fechar >= 1) {
-      c.fechada = true;
-      if (!c.pago) { c.pago = true; ganhar(CFG.pagamento[c.corpo.especie], c.x, c.y - 48); }
-      else flutua(c.x, c.y - 48, 'Fechada', COR.osso);
-    }
+    if (c.fechar >= 1) fecharDeVez(c);
     return;
   }
   if (!c.corpo && c.prof < 2) {
@@ -1180,6 +1179,13 @@ function segurar(q, dt, segura) {
     if (antes < 1 && c.prof >= 1) flutua(c.x, c.y - 48, 'Cova pequena', COR.osso);
     if (antes < 2 && c.prof >= 2) flutua(c.x, c.y - 48, 'Cova grande', COR.osso);
   }
+}
+
+// A cova acabou de ser fechada: o primeiro fechamento paga o enterro
+function fecharDeVez(c) {
+  c.fechada = true;
+  if (!c.pago) { c.pago = true; ganhar(CFG.pagamento[c.corpo.especie], c.x, c.y - 48); }
+  else flutua(c.x, c.y - 48, 'Fechada', COR.osso);
 }
 
 function ganhar(v, x, y) {
@@ -1364,19 +1370,21 @@ function atualizarInimigos(dt) {
   inimigos = inimigos.filter(e => !e.remover);
 }
 
-// ===== Ajudantes: carregador leva defunto até cova cavada; zelador repõe rosa e vela =====
+// ===== Ajudantes: carregador leva defunto até cova cavada; coveiro cava e fecha; zelador repõe rosa e vela =====
 // Andam devagar, demoram CFG.ajudantes.tempoAcao em cada coisa que pegam ou largam, e bicho pode matar
 const contarAjudantes = tipo => ajudantes.filter(a => a.tipo === tipo).length;
 function contratar(tipo) {
   const a = { id: ++idAjudante, ajudante: true, tipo, x: 186, y: 300, r: 11, dir: 0,
-    vida: CFG.ajudantes.vida, inv: 0, carrega: null, tarefa: null, acao: 0, andando: false };
+    vida: CFG.ajudantes.vida, inv: 0, carrega: null, tarefa: null, acao: 0, andando: false, trabalhando: false, progTrab: 0 };
   ajudantes.push(a);
   Object.assign(a, pontoDeEspera(a));
 }
-// cada um espera num lugar: carregador do lado da carroça, zelador perto das bancas
+// cada um espera num lugar: carregador do lado da carroça, coveiro no meio, zelador perto das bancas
 function pontoDeEspera(a) {
   const i = ajudantes.filter(o => o.tipo === a.tipo).indexOf(a);
-  return a.tipo === 'carregador' ? { x: 186, y: 140 + i * 46 } : { x: 196, y: 440 - i * 46 };
+  if (a.tipo === 'carregador') return { x: 186, y: 140 + i * 46 };
+  if (a.tipo === 'coveiro') return { x: 186, y: 272 + i * 46 };
+  return { x: 196, y: 440 - i * 46 };
 }
 const covaServe = (c, corpo) => c && dono[c.area] && !c.corpo && !c.levantou && c.prof >= CFG.profundidade[corpo.especie];
 const covaPede = (c, item) => c && dono[c.area] && c.corpo && c.fechada && !c.levantou && c.enfeite !== c.corpo.pedido && (!item || c.corpo.pedido === item);
@@ -1398,6 +1406,7 @@ function planejar(a) {
     const c = maisPerto(covas.filter(o => covaPede(o) && !reservada(o, a)), ESTANDES[0]);
     return c ? { etapa: 'pegar', item: c.corpo.pedido, cova: c } : null;
   }
+  if (a.tipo === 'coveiro') return planoCoveiro(a);
   const livres = covas.filter(o => dono[o.area] && !o.corpo && !o.levantou && o.prof >= 1 && !reservada(o, a));
   for (let i = 0; i < fila.length; i++) {
     const corpo = fila[i];
@@ -1410,6 +1419,39 @@ function planejar(a) {
   }
   return null;
 }
+// Goblin coveiro: fecha primeiro (é o que paga) e só cava o que os defuntos esperando vão precisar, mais uma de folga
+function planoCoveiro(a) {
+  const minhas = covas.filter(o => dono[o.area] && !o.levantou && !reservada(o, a));
+  const aFechar = minhas.filter(o => o.corpo && !o.fechada);
+  if (aFechar.length) return { etapa: 'fechar', cova: maisPerto(aFechar, a) };
+  const carregados = jogadores.concat(ajudantes).filter(o => o.carrega && o.carrega.tipo === 'corpo').map(o => o.carrega.corpo);
+  const esperando = fila.filter(Boolean).concat(carregados);
+  const livres = covas.filter(o => dono[o.area] && !o.corpo && !o.levantou);
+  const ogros = esperando.filter(c => c.especie === 'ogro').length;
+  const alvo = livres.filter(o => o.prof >= 2).length < ogros ? 2
+    : livres.filter(o => o.prof >= 1).length < esperando.length + 1 ? 1 : 0;
+  const opcoes = alvo ? minhas.filter(o => !o.corpo && o.prof < alvo) : [];
+  if (!opcoes.length) return null;
+  // termina a que já começou; senão abre a mais perto da carroça
+  const comecadas = opcoes.filter(o => o.prof > 0);
+  return { etapa: 'cavar', alvo, cova: comecadas.length ? maisPerto(comecadas, a) : maisPerto(opcoes, SLOTS[0]) };
+}
+// Na beira da cova, cava ou fecha um pouco a cada passo
+function trabalhar(a, dt) {
+  const t = a.tarefa, c = t.cova, k = CFG.ajudantes.coveiro.cava * dt;
+  a.trabalhando = true; a.dir = -Math.PI / 2;
+  if (t.etapa === 'fechar') {
+    c.fechar = Math.min(1, c.fechar + CFG.fecharPorSeg * k);
+    a.progTrab = c.fechar;
+    if (c.fechar >= 1) { fecharDeVez(c); a.tarefa = null; }
+  } else {
+    c.prof = Math.min(t.alvo, c.prof + CFG.cavarPorSeg * k);
+    a.progTrab = c.prof / t.alvo;
+    if (c.prof >= t.alvo) { flutua(c.x, c.y - 48, t.alvo === 2 ? 'Cova grande' : 'Cova pequena', COR.osso); a.tarefa = null; }
+  }
+  a.tSom = (a.tSom || 0) - dt;
+  if (a.tSom <= 0) { tocar('cavar', a.x, a.y); a.tSom = .5; }
+}
 // o serviço ainda faz sentido? (outro coveiro pode ter chegado antes)
 function tarefaSegue(a) {
   const t = a.tarefa;
@@ -1418,6 +1460,8 @@ function tarefaSegue(a) {
   if (t.etapa === 'devolver') return a.carrega && fila.includes(null);
   if (t.etapa === 'pegar') return covaPede(t.cova, t.item);
   if (t.etapa === 'enfeitar') return a.carrega && covaPede(t.cova, a.carrega.item);
+  if (t.etapa === 'cavar') return dono[t.cova.area] && !t.cova.corpo && !t.cova.levantou && t.cova.prof < t.alvo;
+  if (t.etapa === 'fechar') return t.cova.corpo && !t.cova.fechada && !t.cova.levantou;
   return false;
 }
 function destino(a) {
@@ -1448,7 +1492,7 @@ function concluir(a) {
 }
 function atualizarAjudantes(dt) {
   ajudantes.forEach(a => {
-    a.inv = Math.max(0, a.inv - dt); a.andando = false;
+    a.inv = Math.max(0, a.inv - dt); a.andando = false; a.trabalhando = false;
     if (a.acao > 0) { a.acao -= dt; if (a.acao <= 0) { a.acao = 0; concluir(a); } return; }
     if (a.tarefa && !tarefaSegue(a)) a.tarefa = null;
     if (!a.tarefa) a.tarefa = planejar(a);
@@ -1456,7 +1500,7 @@ function atualizarAjudantes(dt) {
     const ogro = a.carrega && a.carrega.tipo === 'corpo' && a.carrega.corpo.especie === 'ogro';
     const chegou = andarAte(a, alvo.x, alvo.y, CFG.ajudantes.vel * (ogro ? .7 : 1) * dt);
     a.andando = !chegou;
-    if (chegou && a.tarefa) a.acao = CFG.ajudantes.tempoAcao;
+    if (chegou && a.tarefa) { if (a.tipo === 'coveiro') trabalhar(a, dt); else a.acao = CFG.ajudantes.tempoAcao; }
   });
   ajudantes = ajudantes.filter(a => !a.morto);
 }
@@ -1892,7 +1936,7 @@ function fotoMundo() {
   return {
     t: 'mundo', estado: estado === 'pausa' ? estadoPausado : estado, dia, dinheiro, meta, relogio: Math.round(relogio * 10) / 10,
     nivelFerr, nivelBota, nivelProp, nivelMochila, nivelComb, velJogo, dono, estoque, tipoFim, stats, codigo: codigoSala, fila, lampioes,
-    ajudantes: ajudantes.map(a => [a.id, a.tipo, Math.round(a.x), Math.round(a.y), r2(a.dir), a.carrega, a.vida, a.andando ? 1 : 0, a.acao > 0 ? r2(1 - a.acao / CFG.ajudantes.tempoAcao) : 0, a.inv > 0 ? 1 : 0]),
+    ajudantes: ajudantes.map(a => [a.id, a.tipo, Math.round(a.x), Math.round(a.y), r2(a.dir), a.carrega, a.vida, a.andando ? 1 : 0, a.acao > 0 ? r2(1 - a.acao / CFG.ajudantes.tempoAcao) : a.trabalhando ? r2(a.progTrab) : 0, a.inv > 0 ? 1 : 0, a.trabalhando ? 1 : 0]),
     evento: evento ? [evento.tipo, evento.etapa, Math.round(evento.frente || 0)] : null,
     moedas: moedas.map(m => [m.id, Math.round(m.x), Math.round(m.y), Math.round(m.ox), Math.round(m.oy), r2(m.t)]),
     perigos: perigos.map(h => [h.tipo, Math.round(h.x), Math.round(h.y), Math.round(h.ox), Math.round(h.oy), r2(h.t), r2(h.dur)]),
@@ -1981,7 +2025,7 @@ function aplicarMundo(m) {
   evento = m.evento ? { tipo: m.evento[0], etapa: m.evento[1], frente: m.evento[2] } : null;
   const velhosA = new Map(ajudantes.map(a => [a.id, a]));
   ajudantes = (m.ajudantes || []).map(v => Object.assign(velhosA.get(v[0]) || { x: v[2], y: v[3], ajudante: true, r: 11 },
-    { id: v[0], tipo: v[1], alvoX: v[2], alvoY: v[3], dir: v[4], carrega: v[5], vida: v[6], andando: !!v[7], prog: v[8], inv: v[9] ? .5 : 0 }));
+    { id: v[0], tipo: v[1], alvoX: v[2], alvoY: v[3], dir: v[4], carrega: v[5], vida: v[6], andando: !!v[7], prog: v[8], inv: v[9] ? .5 : 0, trabalhando: !!v[10] }));
   moedas = (m.moedas || []).map(v => ({ id: v[0], x: v[1], y: v[2], ox: v[3], oy: v[4], t: v[5] }));
   perigos = (m.perigos || []).map(v => ({ tipo: v[0], x: v[1], y: v[2], ox: v[3], oy: v[4], t: v[5], dur: v[6] }));
   m.covas.forEach((v, i) => {
@@ -2365,14 +2409,19 @@ function desenharCoveiro(q) {
   ctx.restore();
 }
 
-// Ajudante: goblin pequeno e verde, de cabeção e orelha pontuda. Carregador de colete marrom, zelador de avental roxo
+// Ajudante: goblin pequeno e verde, de cabeção e orelha pontuda. Carregador de colete marrom, coveiro de camisa azul e pá, zelador de avental roxo
 const PELE_GOBLIN = '#7fb24a';
+const ROUPA_GOBLIN = { carregador: '#6b4a2b', coveiro: '#3f5a73', zelador: '#5a3f73' };
 function desenharAjudante(a) {
-  const x = a.x, y = a.y, bob = a.andando ? Math.sin(tempo * 12 + x * .01) * 1.2 : 0, carregador = a.tipo === 'carregador';
+  const x = a.x, y = a.y, bob = a.andando ? Math.sin(tempo * 12 + x * .01) * 1.2 : 0;
   ctx.save();
   if (a.inv > 0 && Math.floor(tempo * 20) % 2) ctx.globalAlpha = .45;
   sombra(x, y + 10, 10, 3.5);
-  ctx.beginPath(); ctx.ellipse(x, y + 3 + bob * .3, 8, 7.5, 0, 0, TAU); ctx.fillStyle = carregador ? '#6b4a2b' : '#5a3f73'; ctx.fill(); contorno(2);
+  if (a.tipo === 'coveiro') {
+    const balanco = a.trabalhando ? Math.sin(tempo * 14) * .6 : 0;
+    ctx.save(); ctx.translate(x, y + bob); ctx.scale(.62, .62); desenharFerramenta(0, 0, a.dir + .9 + balanco, 1); ctx.restore();
+  }
+  ctx.beginPath(); ctx.ellipse(x, y + 3 + bob * .3, 8, 7.5, 0, 0, TAU); ctx.fillStyle = ROUPA_GOBLIN[a.tipo] || ROUPA_GOBLIN.zelador; ctx.fill(); contorno(2);
   const hx = x + Math.cos(a.dir) * 1.5, hy = y - 5 + bob, ox = Math.cos(a.dir) * 2;
   [-1, 1].forEach(sg => {
     ctx.beginPath(); ctx.moveTo(hx + sg * 5, hy - 2); ctx.lineTo(hx + sg * 14, hy - 6); ctx.lineTo(hx + sg * 5.5, hy + 3); ctx.closePath();
@@ -2718,7 +2767,7 @@ function desenhar() {
   }
   ajudantes.forEach(a => {
     if (!naTela(a.y)) return;
-    const prog = modo === 'convidado' ? a.prog : a.acao > 0 ? 1 - a.acao / CFG.ajudantes.tempoAcao : 0;
+    const prog = modo === 'convidado' ? a.prog : a.acao > 0 ? 1 - a.acao / CFG.ajudantes.tempoAcao : a.trabalhando ? a.progTrab : 0;
     if (prog > 0) barra(a.x, a.y - 26, prog, COR.osso);
     if (a.vida < CFG.ajudantes.vida) barra(a.x, a.y - 34, a.vida / CFG.ajudantes.vida, COR.sangue);
   });
