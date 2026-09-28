@@ -223,10 +223,11 @@ const CFG = {
     coveiro: { nome: 'Goblin coveiro', preco: 50, desc: 'cava e fecha cova', cava: 1 }, // cava: ritmo, 1 = coveiro de mãos
   },
   // Bichos da noite: poucos no começo, muitos no fim, e a cada dia com mais defesa e mais cura
-  ladroes: d => Math.max(1, Math.round(0.25 * d * d + 0.75)), // 1, 2, 3, 5, 7
+  // 1, 2, 3, 5, 7; no infinito, +1 por dia depois do 5 até o teto
+  ladroes: d => (d <= CFG.dias ? Math.max(1, Math.round(0.25 * d * d + 0.75)) : Math.min(CFG.infinito.maxLadroes, 7 + (d - CFG.dias) * CFG.infinito.ladroesPorDia)),
   chanceBrutamontes: d => Math.min(0.5, Math.max(0, 0.15 * (d - 2))), // aparece a partir do dia 3
-  defesa: d => Math.min(0.6, 0.08 * (d - 1)), // parte do golpe que o bicho segura
-  cura: d => 0.12 * (d - 1),                  // vida que o bicho recupera por segundo
+  defesa: d => Math.min(CFG.infinito.defesaMax, 0.08 * (d - 1)), // parte do golpe que o bicho segura
+  cura: d => Math.min(CFG.infinito.curaMax, 0.12 * (d - 1)),      // vida que o bicho recupera por segundo
   roubo: d => 8 + 2 * d,
   tempoRoubo: 5,
   ladrao: {
@@ -248,7 +249,16 @@ const CFG = {
     bombas: { n: 3, raio: 46, voo: 1.3, dano: 1 },
     investida: { mira: 0.9, vel: 540, alcance: 360, dano: 2, tonto: 1.4 },
     estrepes: { n: 6, voo: 0.6, dura: 9, dano: 1 },
+    cresce: { vida: 1.5, bombas: 1, estrepes: 2, moedas: 20 }, // no infinito, a cada volta dele (dias 10, 15...)
   },
+  // Modo infinito: sem dívida, acaba quando todo mundo cai. Os dias 1 a 5 são iguais aos do modo 5 dias
+  infinito: {
+    chefeACada: 5,
+    ladroesPorDia: 1, maxLadroes: 15, // do dia 6 em diante, +1 ladrão por dia até o teto (fora o coveiro extra do online)
+    vidaPorDia: 0.1,                  // +10% de vida nos bichos por dia depois do 5, acumulando; o dano sobe 1 depois de cada chefe
+    defesaMax: 0.5, curaMax: 0.6,     // teto da defesa e da cura, pra ainda dar pra derrubar
+  },
+  liberaCova: 2, // cova fechada e resolvida vira lote vazio no segundo amanhecer depois do enterro (nos dois modos)
   // Eventos do dia: no máximo um por dia, sorteado quando o dia começa
   eventos: {
     vento: { desdeDia: 2, chance: 0.6, aviso: 3, velocidade: 300, pegaCova: 0.75 },
@@ -510,12 +520,13 @@ let estado = 'titulo', estadoPausado = null;
 let dia = 1, dinheiro = 0, relogio = CFG.duracaoDia, tChegada = 0, tNoite = 0, tLimpa = 0;
 let nivelFerr = 0, nivelBota = 0, dono = [true], estoque = 0, meta = CFG.meta, tipoFim = null;
 let nivelProp = 0, nivelMochila = 0, nivelComb = { vida: 0, defesa: 0, ataque: 0, velAtaque: 0 };
+let infinito = false; // modo sem fim: sem dívida, acaba quando todo mundo cai
 let ajudantes = [], idAjudante = 0, velJogo = 1, lojaAba = 'equipamento';
 let fila = [null, null, null, null], covas = [], lampioes = [], inimigos = [], flutuantes = [], agenda = [];
 let AREAS = [], mundoW = W, mundoH = H, camX = 0, camY = 0, camDX = 0, camDY = 0;
 let evento = null, eventoHoje = null, tChefe = null, moedas = [], perigos = [];
 let soltas = [], rajadas = [], folhas = [], ventoVis = 0;
-let stats = { ganho: 0, roubado: 0, recuperado: 0 }, idCorpo = 0, idInimigo = 0, idMoeda = 0;
+let stats = { ganho: 0, roubado: 0, recuperado: 0, enterros: 0 }, idCorpo = 0, idInimigo = 0, idMoeda = 0;
 let escuro = 0.35, tremor = 0, tempo = 0, painelEm = 0;
 const novoJogador = (id, nome, cor) => ({
   id, nome, cor, x: 184, y: 300, r: 14, dir: 0, carrega: null, itens: [], vida: CFG.vidaMax, inv: 0, cdAtaque: 0, golpe: 0,
@@ -547,7 +558,7 @@ function ajustarAreas(n) {
     for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) covas.push({
       area: ai, x: a.x + 30 + c * 58, y: a.y + 80 + r * 150, w: 38, h: 64,
       prof: 0, corpo: null, fechada: false, fechar: 0, enfeite: null,
-      pago: false, gorjeta: false, levantou: false, levantarEm: null,
+      pago: false, gorjeta: false, levantou: false, levantarEm: null, enterradoEm: 0,
     });
   }
   while (dono.length < n) dono.push(false);
@@ -567,13 +578,19 @@ function novoJogo() {
   ajustarAreas(areasVisiveis());
   meta = metaPara(jogadores.length);
   jogadores.forEach((q, i) => Object.assign(q, { x: 184, y: 250 + i * 34, dir: 0, carrega: null, itens: [], vida: vidaMaxima(), inv: 0, cdAtaque: 0, golpe: 0, caido: false, trabalhando: false }));
-  stats = { ganho: 0, roubado: 0, recuperado: 0 };
+  stats = { ganho: 0, roubado: 0, recuperado: 0, enterros: 0 };
   chegar('humano'); chegar('humano');
 }
 const metaPara = n => Math.round(CFG.meta * (0.5 + 0.5 * n));
 const nLadroes = () => CFG.ladroes(dia) + Math.max(0, jogadores.length - 1);
-const ultimaNoite = () => dia >= CFG.dias;
-const duracaoNoite = () => (ultimaNoite() ? CFG.chefe.duracaoNoite : CFG.duracaoNoite);
+const noiteDoChefe = () => (infinito ? dia % CFG.infinito.chefeACada === 0 : dia >= CFG.dias);
+const duracaoNoite = () => (noiteDoChefe() ? CFG.chefe.duracaoNoite : CFG.duracaoNoite);
+const deDias = () => (infinito ? '' : ` de ${CFG.dias}`);
+// Do dia 6 em diante (só existe no infinito) os bichos ganham vida todo dia e dano depois de cada chefe
+const alemDo5 = () => Math.max(0, dia - CFG.dias);
+const fatorVida = () => (1 + CFG.infinito.vidaPorDia) ** alemDo5();
+const danoExtra = () => Math.ceil(alemDo5() / CFG.infinito.chefeACada);
+const voltaDoChefe = () => (infinito ? Math.max(0, Math.floor(dia / CFG.infinito.chefeACada) - 1) : 0);
 
 function chegar(especie) {
   const i = fila.indexOf(null);
@@ -604,7 +621,7 @@ function comecarNoite() {
   estado = 'noite'; relogio = duracaoNoite(); tNoite = 0; tLimpa = 0; stats.roubado = 0; stats.recuperado = 0;
   const n = nLadroes(), passo = Math.min(8, 42 / n) / Math.max(1, jogadores.length * .75);
   agenda = Array.from({ length: n }, (_, i) => 2 + i * passo + rnd(0, 2)).sort((a, b) => a - b);
-  tChefe = ultimaNoite() ? CFG.chefe.chegaEm : null;
+  tChefe = noiteDoChefe() ? CFG.chefe.chegaEm : null;
   covas.forEach(c => { if (malResolvida(c)) c.levantarEm = rnd(3, 10); });
   renderPainel();
   aviso('Anoiteceu.');
@@ -617,10 +634,19 @@ function amanhecer() {
   jogadores.forEach(q => { q.vida = vidaMaxima(); q.inv = 0; q.caido = false; });
   ajudantes.forEach(a => { a.vida = CFG.ajudantes.vida; });
   soltar();
-  if (dia >= CFG.dias) { fim(dinheiro >= meta ? 'vitoria' : 'divida'); return; }
+  if (!infinito && dia >= CFG.dias) { fim(dinheiro >= meta ? 'vitoria' : 'divida'); return; }
   dia++;
+  liberarCovas();
   estado = 'amanhecer';
   renderPainel();
+}
+
+// Cova fechada e resolvida vira lote vazio de novo no segundo amanhecer depois do enterro. Mal resolvida fica
+function liberarCovas() {
+  covas.forEach(c => {
+    if (!c.corpo || c.levantou || malResolvida(c) || dia - c.enterradoEm < CFG.liberaCova) return;
+    Object.assign(c, { prof: 0, corpo: null, fechada: false, fechar: 0, enfeite: null, pago: false, gorjeta: false, levantarEm: null, enterradoEm: 0 });
+  });
 }
 
 function fim(tipo) {
@@ -727,7 +753,8 @@ function mostrarSolo() {
     <p>Seu tio te deixou um cemitério e uma dívida de <b>$${CFG.meta}</b>. Paga em ${CFG.dias} dias.</p>
     ${comoJogar()}
     <div class="botoes">
-      <button class="btn" type="button" data-acao="jogar-solo" data-principal>Começar</button>
+      <button class="btn" type="button" data-acao="jogar-solo" data-principal>5 dias</button>
+      <button class="btn" type="button" data-acao="jogar-infinito">Infinito</button>
       <button class="btn sec" type="button" data-acao="tela-inicio">Voltar</button>
     </div>
   </div>`);
@@ -795,7 +822,7 @@ function mostrarSala() {
     <p class="nota">Dívida: $${metaPara(n)}</p>
     ${anf ? '' : esperando('começar')}
     <div class="botoes">
-      ${anf ? '<button class="btn" type="button" data-acao="comecar" data-principal>Começar</button>' : ''}
+      ${anf ? '<button class="btn" type="button" data-acao="comecar" data-principal>5 dias</button><button class="btn" type="button" data-acao="comecar-infinito">Infinito</button>' : ''}
       <button class="btn sec" type="button" data-acao="config">Configurações</button>
       <button class="btn sec" type="button" data-acao="sair-multi">Sair da sala</button>
     </div>
@@ -835,8 +862,8 @@ function mostrarLoja() {
       linha(k, `${c.nome} ${pips(nivelComb[k], c.precos.length)}`, c.desc(nivelComb[k]), 'no máximo')),
   };
   mostrarPainel(`<div class="cartao largo">
-    <div><p class="sobre">Anoitecer do dia ${dia} de ${CFG.dias}</p><h2>Loja do coveiro</h2></div>
-    <div class="saldo"><b>$${dinheiro}</b><span>de $${meta} · vence no dia ${CFG.dias + 1}</span></div>
+    <div><p class="sobre">Anoitecer do dia ${dia}${deDias()}</p><h2>Loja do coveiro</h2></div>
+    <div class="saldo"><b>$${dinheiro}</b>${infinito ? '' : `<span>de $${meta} · vence no dia ${CFG.dias + 1}</span>`}</div>
     <div class="loja-corpo">
       <nav class="loja-abas" role="tablist" aria-label="Seções da loja">
         ${ABAS_LOJA.map(([k, nome]) => `<button type="button" role="tab" data-acao="aba-${k}" aria-selected="${lojaAba === k}">${nome}</button>`).join('')}
@@ -851,24 +878,24 @@ function mostrarAmanhecer() {
   const perdido = stats.roubado - stats.recuperado;
   const faltam = CFG.dias - dia + 1;
   mostrarPainel(`<div class="cartao">
-    <div><p class="sobre">Amanheceu</p><h2>Dia ${dia} de ${CFG.dias}</h2></div>
+    <div><p class="sobre">Amanheceu</p><h2>Dia ${dia}${deDias()}</h2></div>
     <ul class="resumo">
       <li><span>Ganhou ontem</span><b>$${stats.ganho}</b></li>
       <li><span>Ladrões levaram</span><b>$${perdido}</b></li>
     </ul>
-    <div class="saldo"><b>$${dinheiro}</b><span>de $${meta} · ${faltam === 1 ? 'último dia' : 'faltam ' + faltam + ' dias'}</span></div>
+    <div class="saldo"><b>$${dinheiro}</b>${infinito ? '' : `<span>de $${meta} · ${faltam === 1 ? 'último dia' : 'faltam ' + faltam + ' dias'}</span>`}</div>
     ${modo !== 'convidado' ? '<button class="btn" type="button" data-acao="dia" data-principal>Começar o dia</button>' : esperando('começar o dia')}
   </div>`);
 }
 
 function mostrarFim() {
-  const enterros = covas.filter(c => c.pago || (c.corpo && c.fechada)).length;
+  const enterros = stats.enterros || 0;
   const falta = Math.max(0, meta - dinheiro);
   const time = jogadores.length > 1;
   const t = {
     vitoria: ['Amanhecer do dia ' + (CFG.dias + 1), 'Dívida paga', `$${dinheiro} e ${enterros} enterros. O cemitério é ${time ? 'de vocês' : 'seu'}.`, 'Jogar de novo'],
     divida: ['Amanhecer do dia ' + (CFG.dias + 1), 'A prefeitura levou tudo', `Faltou $${falta}. A prefeitura tomou o cemitério.`, 'Tentar de novo'],
-    morte: [`Noite do dia ${dia}`, time ? 'O time inteiro caiu' : 'Você virou cliente', 'Pelo menos o enterro sai de graça.', 'Tentar de novo'],
+    morte: [`Noite do dia ${dia}`, time ? 'O time inteiro caiu' : 'Você virou cliente', `${infinito ? `Chegou no dia ${dia} com $${dinheiro}. ` : ''}Pelo menos o enterro sai de graça.`, 'Tentar de novo'],
   }[tipoFim] || ['Fim', 'Fim de jogo', '', 'Jogar de novo'];
   mostrarPainel(`<div class="cartao">
     <div><p class="sobre">${t[0]}</p><h2>${t[1]}</h2></div>
@@ -883,7 +910,7 @@ function mostrarFim() {
 
 function mostrarPausa() {
   mostrarPainel(`<div class="cartao">
-    <div><p class="sobre">Dia ${dia} de ${CFG.dias}</p><h2>Pausado</h2></div>
+    <div><p class="sobre">Dia ${dia}${deDias()}</p><h2>Pausado</h2></div>
     <p>Pode ir no banheiro. Os mortos esperam.</p>
     <div class="botoes">
       <button class="btn" type="button" data-acao="continuar" data-principal>Continuar</button>
@@ -914,7 +941,7 @@ $('#painel').addEventListener('click', e => {
   if (acao.startsWith('aba-')) { lojaAba = acao.slice(4); mostrarLoja(); const a = $(`[data-acao="${acao}"]`); if (a) a.focus(); return; }
   switch (acao) {
     case 'tela-inicio': case 'tela-solo': case 'tela-multi': telaInicio = acao.slice(5); renderPainel(); break;
-    case 'jogar-solo': modo = 'solo'; novoJogo(); comecarDia(); break;
+    case 'jogar-solo': case 'jogar-infinito': modo = 'solo'; infinito = acao === 'jogar-infinito'; novoJogo(); comecarDia(); break;
     case 'config': subtela = 'config'; renderPainel(); break;
     case 'fechar-config': fecharConfig(); break;
     case 'config-padrao': config = Object.assign({}, CONFIG_PADRAO); salvarConfig(); aplicarVolumes(); aplicarLeve(); renderPainel(); break;
@@ -923,7 +950,7 @@ $('#painel').addEventListener('click', e => {
     case 'criar': criarSala(); break;
     case 'entrar': entrarSala(($('#codigo') || {}).value || ''); break;
     case 'entrar-link': entrarSala(salaUrl); break;
-    case 'comecar': novoJogo(); comecarDia(); break;
+    case 'comecar': case 'comecar-infinito': infinito = acao === 'comecar-infinito'; novoJogo(); comecarDia(); break;
     case 'dia': comecarDia(); break;
     case 'noite': comecarNoite(); break;
     case 'continuar': despausar(); break;
@@ -1184,7 +1211,7 @@ function segurar(q, dt, segura) {
 // A cova acabou de ser fechada: o primeiro fechamento paga o enterro
 function fecharDeVez(c) {
   c.fechada = true;
-  if (!c.pago) { c.pago = true; ganhar(CFG.pagamento[c.corpo.especie], c.x, c.y - 48); }
+  if (!c.pago) { c.pago = true; c.enterradoEm = dia; stats.enterros++; ganhar(CFG.pagamento[c.corpo.especie], c.x, c.y - 48); }
   else flutua(c.x, c.y - 48, 'Fechada', COR.osso);
 }
 
@@ -1213,7 +1240,7 @@ function atacar(q, e) {
 function derrotar(e) {
   e.remover = true;
   if (e.tipo === 'zumbi') { devolver(e); flutua(e.x, e.y - 30, 'De volta pra cova', COR.osso); return; }
-  const trocado = e.tipo === 'chefe' ? CFG.moedas.chefe : CFG.moedas[e.especie === 'brutamontes' ? 'brutamontes' : 'ladrao'](dia);
+  const trocado = e.tipo === 'chefe' ? CFG.moedas.chefe + (e.volta || 0) * CFG.chefe.cresce.moedas : CFG.moedas[e.especie === 'brutamontes' ? 'brutamontes' : 'ladrao'](dia);
   soltarMoedas(e.x, e.y, trocado + e.saque, e.saque);
   if (e.tipo === 'chefe') {
     perigos = perigos.filter(h => h.tipo === 'estrepe' && h.t >= CFG.chefe.estrepes.voo);
@@ -1269,13 +1296,13 @@ function ferir(q, d, fonte) {
 // ===== Inimigos =====
 function novoLadrao() {
   const especie = Math.random() < CFG.chanceBrutamontes(dia) ? 'brutamontes' : 'comum';
-  const t = CFG.ladrao[especie], vida = t.vida(dia);
+  const t = CFG.ladrao[especie], vida = Math.round(t.vida(dia) * fatorVida());
   const lado = escolha(['direita', 'baixo', 'cima']);
   const pos = lado === 'direita' ? { x: mundoW + 16, y: rnd(80, mundoH - 40) }
     : lado === 'baixo' ? { x: rnd(260, mundoW - 30), y: mundoH + 16 }
     : { x: rnd(260, mundoW - 30), y: 18 };
   inimigos.push({
-    id: ++idInimigo, tipo: 'ladrao', especie, x: pos.x, y: pos.y, r: t.r, vida, vidaMax: vida, vel: t.vel, dano: t.dano, peso: t.peso,
+    id: ++idInimigo, tipo: 'ladrao', especie, x: pos.x, y: pos.y, r: t.r, vida, vidaMax: vida, vel: t.vel, dano: t.dano + danoExtra(), peso: t.peso,
     defesa: CFG.defesa(dia), cura: CFG.cura(dia), estado: 'indo', alvo: null, prog: 0, saque: 0, cd: .6, flash: 0, dir: Math.PI,
   });
   const bruto = especie === 'brutamontes';
@@ -1285,9 +1312,9 @@ function novoLadrao() {
 }
 
 function levantar(c) {
-  const z = CFG.zumbi[c.corpo.especie];
+  const z = CFG.zumbi[c.corpo.especie], vida = Math.round(z.vida * fatorVida());
   c.levantou = true; c.fechada = false; c.fechar = 0; c.enfeite = null;
-  inimigos.push({ id: ++idInimigo, tipo: 'zumbi', especie: c.corpo.especie, x: c.x, y: c.y, r: z.r, vida: z.vida, vidaMax: z.vida, vel: z.vel, dano: z.dano, defesa: CFG.defesa(dia), cura: CFG.cura(dia), cova: c, cd: .8, flash: 0, dir: 0 });
+  inimigos.push({ id: ++idInimigo, tipo: 'zumbi', especie: c.corpo.especie, x: c.x, y: c.y, r: z.r, vida, vidaMax: vida, vel: z.vel, dano: z.dano + danoExtra(), defesa: CFG.defesa(dia), cura: CFG.cura(dia), cova: c, cd: .8, flash: 0, dir: 0 });
   flutua(c.x, c.y - 44, 'Levantou!', COR.sangue); tocar('gemido', c.x, c.y);
   tremer(.2);
 }
@@ -1529,11 +1556,11 @@ function vitimaMaisPerto(e) {
 // ===== Chefão: anda atrás do coveiro mais perto e alterna ataques que avisam antes =====
 function novoChefe() {
   const cf = CFG.chefe, q = escolha(jogadores.filter(o => !o.caido)) || p;
-  const vida = Math.round(cf.vida * (0.6 + 0.4 * jogadores.length));
+  const volta = voltaDoChefe(), vida = Math.round(cf.vida * (0.6 + 0.4 * jogadores.length) * cf.cresce.vida ** volta);
   const x = Math.max(260, Math.min(mundoW - 60, q.x + rnd(-140, 140))), y0 = Math.max(6, q.y - 280);
   inimigos.push({
     id: ++idInimigo, tipo: 'chefe', especie: '', x, y: y0, r: cf.r, vida, vidaMax: vida, vel: cf.vel, peso: 0,
-    defesa: CFG.defesa(dia), cura: CFG.cura(dia) / 2, estado: 'andando', prog: 0, saque: 0, cd: 2.5, cdGolpe: 0, flash: 0, dir: Math.PI / 2, ultimo: '',
+    defesa: CFG.defesa(dia), cura: CFG.cura(dia) / 2, estado: 'andando', prog: 0, saque: 0, cd: 2.5, cdGolpe: 0, flash: 0, dir: Math.PI / 2, ultimo: '', volta,
   });
   aviso('O chefe dos ladrões pulou o muro!'); tremer(.5); tocar('chefe', x, y0);
   flutua(x, y0 + 64, 'Chefão!', COR.sangue);
@@ -1596,14 +1623,14 @@ function arremessar(e, a, q) {
   const cf = CFG.chefe, ox = e.x, oy = e.y - e.r;
   tocar('arremesso', e.x, e.y);
   if (a === 'bombas') {
-    const n = cf.bombas.n + Math.max(0, jogadores.length - 1);
+    const n = cf.bombas.n + e.volta * cf.cresce.bombas + Math.max(0, jogadores.length - 1);
     for (let i = 0; i < n; i++) {
       const alvo = i === 0 ? q : escolha(jogadores.filter(o => !o.caido)) || q;
       const ang = rnd(0, TAU), d = i === 0 ? 0 : rnd(50, 95);
       perigos.push({ tipo: 'bomba', ox, oy, x: prenderX(alvo.x + Math.cos(ang) * d), y: prenderY(alvo.y + Math.sin(ang) * d), t: -i * .12, dur: cf.bombas.voo });
     }
   } else {
-    for (let i = 0; i < cf.estrepes.n; i++) {
+    for (let i = 0; i < cf.estrepes.n + e.volta * cf.cresce.estrepes; i++) {
       const ang = rnd(0, TAU), d = rnd(30, 150);
       perigos.push({ tipo: 'estrepe', ox, oy, x: prenderX(q.x + Math.cos(ang) * d), y: prenderY(q.y + Math.sin(ang) * d), t: -i * .05, dur: cf.estrepes.voo + cf.estrepes.dura });
     }
@@ -1934,7 +1961,7 @@ function receberDoConvidado(id, d) {
 const r2 = v => Math.round(v * 100) / 100;
 function fotoMundo() {
   return {
-    t: 'mundo', estado: estado === 'pausa' ? estadoPausado : estado, dia, dinheiro, meta, relogio: Math.round(relogio * 10) / 10,
+    t: 'mundo', estado: estado === 'pausa' ? estadoPausado : estado, dia, infinito, dinheiro, meta, relogio: Math.round(relogio * 10) / 10,
     nivelFerr, nivelBota, nivelProp, nivelMochila, nivelComb, velJogo, dono, estoque, tipoFim, stats, codigo: codigoSala, fila, lampioes,
     ajudantes: ajudantes.map(a => [a.id, a.tipo, Math.round(a.x), Math.round(a.y), r2(a.dir), a.carrega, a.vida, a.andando ? 1 : 0, a.acao > 0 ? r2(1 - a.acao / CFG.ajudantes.tempoAcao) : a.trabalhando ? r2(a.progTrab) : 0, a.inv > 0 ? 1 : 0, a.trabalhando ? 1 : 0]),
     evento: evento ? [evento.tipo, evento.etapa, Math.round(evento.frente || 0)] : null,
@@ -2017,7 +2044,7 @@ function aplicarMundo(m) {
   // pacote mais velho que o último aplicado: o estado dele já passou, só os avisos, sons e efeitos valem
   if (Number.isInteger(m.n)) { if (m.n <= ultimoMundoN) { aplicarEventos(m.ev); return; } ultimoMundoN = m.n; }
   const antes = estado;
-  estado = m.estado; dia = m.dia; dinheiro = m.dinheiro; meta = m.meta; relogio = m.relogio;
+  estado = m.estado; dia = m.dia; infinito = !!m.infinito; dinheiro = m.dinheiro; meta = m.meta; relogio = m.relogio;
   nivelFerr = m.nivelFerr; nivelBota = m.nivelBota || 0; nivelProp = m.nivelProp || 0; nivelMochila = m.nivelMochila || 0; velJogo = m.velJogo || 1;
   if (m.nivelComb) nivelComb = m.nivelComb; estoque = m.estoque; tipoFim = m.tipoFim; stats = m.stats; codigoSala = m.codigo;
   fila = m.fila; lampioes = m.lampioes;
@@ -2070,7 +2097,7 @@ function aplicarEventos(lista) {
     if (ev.tr && config.tremor) tremor = Math.max(tremor, +ev.tr || 0);
   });
 }
-const assinaturaAtual = () => [estado, dia, dinheiro, nivelFerr, nivelBota, nivelProp, nivelMochila, JSON.stringify(nivelComb), ajudantes.length, estoque, tipoFim, stats.ganho, stats.roubado, stats.recuperado, jogadores.map(q => q.nome + q.cor).join(',')].join('|');
+const assinaturaAtual = () => [estado, dia, infinito, dinheiro, nivelFerr, nivelBota, nivelProp, nivelMochila, JSON.stringify(nivelComb), ajudantes.length, estoque, tipoFim, stats.ganho, stats.roubado, stats.recuperado, jogadores.map(q => q.nome + q.cor).join(',')].join('|');
 
 function suavizar(dt) {
   const k = Math.min(1, dt * 12);
@@ -2801,7 +2828,7 @@ const fmt = s => { s = Math.max(0, Math.ceil(s)); return `${Math.floor(s / 60)}:
 
 function atualizarHUD() {
   const fase = estado === 'pausa' ? estadoPausado : estado;
-  pinta('hud-dia', 'textContent', `Dia ${dia} de ${CFG.dias}`);
+  pinta('hud-dia', 'textContent', `Dia ${dia}${deDias()}`);
   pinta('hud-fase', 'textContent', { dia: 'Dia', noite: 'Noite', loja: 'Anoitecer', amanhecer: 'Amanhecer', fim: 'Fim', sala: 'Sala' }[fase] || 'Dia');
   pinta('hud-fase', 'className', 'fase ' + (fase === 'noite' || fase === 'loja' ? 'noite' : 'dia'));
   const dur = fase === 'noite' ? duracaoNoite() : CFG.duracaoDia;
@@ -2809,7 +2836,7 @@ function atualizarHUD() {
   pinta('hud-relogio', 'textContent', ativo ? fmt(relogio) : fmt(fase === 'loja' ? duracaoNoite() : CFG.duracaoDia));
   pinta('hud-barra', 'width', (ativo ? Math.max(0, relogio / dur) * 100 : 100).toFixed(1) + '%');
   pinta('hud-dinheiro', 'textContent', `$${dinheiro}`);
-  pinta('hud-meta', 'textContent', `de $${meta}`);
+  pinta('hud-meta', 'textContent', infinito ? '' : `de $${meta}`);
   let v = '';
   for (let i = 0; i < vidaMaxima(); i++) v += i < p.vida ? '♥' : '<span class="vazio">♥</span>';
   pinta('hud-vida', 'innerHTML', v);
