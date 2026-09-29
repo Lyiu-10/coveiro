@@ -35,8 +35,10 @@ input{-webkit-user-select:text;user-select:text}
 #hud-barra{height:100%;width:100%;background:var(--osso-2)}
 .dinheiro b{color:var(--ambar);font-size:21px;font-weight:700}
 .dinheiro span{color:var(--osso-2);font-size:13px;margin-left:4px}
-#hud-vida{color:var(--sangue);font-size:18px;letter-spacing:1px}
-#hud-vida .vazio{color:var(--tinta-3)}
+.vida{position:relative;width:110px;height:12px;border-radius:99px;background:var(--tinta-3);overflow:hidden}
+#hud-vida-barra{height:100%;background:var(--sangue);transition:width .15s}
+/* uma marquinha por ponto de vida */
+.vida::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent calc(100% - 2px),var(--tinta) 0) 0 0/calc(100% / var(--n,5)) 100%}
 .chip{font-size:13px;padding:3px 10px;border:1px solid var(--linha);border-radius:999px;color:var(--osso-2)}
 #palco{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
 #tela{display:block;border-radius:10px;box-shadow:0 0 0 1px var(--linha),0 18px 50px rgba(0,0,0,.45);touch-action:none}
@@ -117,7 +119,7 @@ kbd{font-family:inherit;font-size:.85em;font-weight:600;padding:1px 6px;border-r
 .btn-toque{position:absolute;pointer-events:auto;touch-action:none;border-radius:50%;border:2px solid rgba(239,230,210,.35);font:inherit;font-weight:600;color:var(--osso);background:rgba(22,19,28,.6)}
 #btn-acao{right:14px;bottom:18px;width:84px;height:84px;font-size:16px;background:rgba(242,181,68,.85);color:var(--tinta)}
 #btn-lampiao{right:110px;bottom:12px;width:62px;height:62px;font-size:12px}
-@media (max-width:560px){#hud{font-size:13px}.relogio{width:64px}#hud-dia{font-size:19px}.dinheiro b{font-size:18px}}
+@media (max-width:560px){#hud{font-size:13px}.relogio,.vida{width:64px}#hud-dia{font-size:19px}.dinheiro b{font-size:18px}}
 </style>
 
 <div id="app">
@@ -131,7 +133,7 @@ kbd{font-family:inherit;font-size:.85em;font-weight:600;padding:1px 6px;border-r
     </div>
     <div class="hud-grupo">
       <span class="dinheiro num"><b id="hud-dinheiro">$0</b><span id="hud-meta">de $200</span></span>
-      <span id="hud-vida" aria-label="Vida"></span>
+      <div id="hud-vida" class="vida" role="meter" aria-label="Vida" aria-valuemin="0"><div id="hud-vida-barra"></div></div>
       <span id="hud-ferramenta" class="chip">Mãos</span>
       <span id="hud-bota" class="chip" hidden></span>
       <span id="hud-lampioes" class="chip">Lampiões 0</span>
@@ -171,6 +173,7 @@ const CFG = {
   velocidade: 165,
   vidaMax: 5,
   intervaloGolpe: 0.6,  // segundos entre um golpe e outro do coveiro
+  alcanceGolpe: 48,     // do meio do coveiro até a borda do bicho; é o círculo branco em volta dele
   velocidadeRapida: 1.5, // o botão de acelerar o jogo
   precoLampiao: 15,
   // Torre: compra na loja, vai pra mochila e monta numa base de pedra (2 por terreno). Atira de noite; bicho pode quebrar
@@ -209,7 +212,7 @@ const CFG = {
   ],
   // Combate do coveiro: cada um tem 3 níveis. Vale pro time todo
   combate: {
-    vida: { nome: 'Vida', precos: [35, 70, 120], desc: () => '+1 coração' },
+    vida: { nome: 'Vida', precos: [35, 70, 120], desc: () => '+1 de vida' },
     defesa: { nome: 'Defesa', precos: [30, 60, 100], por: 0.15, desc: n => `${Math.round((n + 1) * 15)}% de aparar` },
     ataque: { nome: 'Ataque', precos: [30, 60, 100], por: 0.25, desc: n => `+${(n + 1) * 25}% dano` },
     velAtaque: { nome: 'Velocidade de ataque', precos: [25, 50, 90], por: 0.85, desc: n => `golpe a cada ${(CFG.intervaloGolpe * 0.85 ** (n + 1)).toFixed(2).replace('.', ',')} s` },
@@ -232,6 +235,8 @@ const CFG = {
   cura: d => Math.min(CFG.infinito.curaMax, 0.12 * (d - 1)),      // vida que o bicho recupera por segundo
   roubo: d => 8 + 2 * d,
   tempoRoubo: 5,
+  // Ladrão que vê um coveiro a menos de "visao" vai atrás pra bater; se o coveiro passa de "perde", volta pra cova ou torre mais perto
+  perseguir: { visao: 150, perde: 240 },
   ladrao: {
     comum: { vida: d => 2 + Math.floor(d / 3), vel: 92, r: 13, dano: 1, roubo: 1, peso: 1 },
     brutamontes: { vida: d => 6 + d, vel: 70, r: 18, dano: 2, roubo: 1.5, peso: 0.5 },
@@ -998,7 +1003,7 @@ $('#painel').addEventListener('click', e => {
   }
 });
 
-// ===== Acelerar o jogo e pular a noite: qualquer coveiro pode (o convidado pede ao anfitrião) =====
+// ===== Acelerar o jogo: qualquer coveiro pode (o convidado pede ao anfitrião) =====
 function alternarVelocidade(q) {
   if (estado !== 'dia' && estado !== 'noite') return;
   velJogo = velJogo === 1 ? CFG.velocidadeRapida : 1;
@@ -1151,7 +1156,7 @@ function inimigoPerto(q, r) {
 
 function acaoPress(q) {
   if ((estado !== 'dia' && estado !== 'noite') || q.caido) return;
-  const inimigo = inimigoPerto(q, 40);
+  const inimigo = inimigoPerto(q, CFG.alcanceGolpe);
   if (inimigo) { if (q.cdAtaque <= 0) atacar(q, inimigo); return; }
   const a = alvoAtual(q);
   if (!a) return;
@@ -1243,7 +1248,7 @@ function atualizarPressa(dt) {
 function segurar(q, dt, segura) {
   q.trabalhando = false;
   if (!segura || q.caido) return;
-  const inimigo = inimigoPerto(q, 40);
+  const inimigo = inimigoPerto(q, CFG.alcanceGolpe);
   if (inimigo) { if (q.cdAtaque <= 0) atacar(q, inimigo); return; }
   const a = alvoAtual(q);
   if (!a || a.tipo !== 'cova') return;
@@ -1427,14 +1432,23 @@ function atualizarInimigos(dt) {
       if (dist(e, q) < e.r + q.r + 2 && e.cd <= 0) { e.cd = 1; if (q.torre) ferirTorre(q, e.dano); else if (q.ajudante) ferirAjudante(q, e.dano, e); else ferir(q, e.dano, e); }
       continue;
     }
+    // viu um coveiro perto: larga o que tava fazendo e vai bater nele; se ele fugir pra longe, volta pro serviço
+    const visto = e.estado !== 'fugindo' && coveiroMaisPerto(e), dv = visto ? dist(visto, e) : Infinity;
+    if (dv < CFG.perseguir.visao) { e.estado = 'cacando'; e.alvo = null; }
+    else if (e.estado === 'cacando' && dv > CFG.perseguir.perde) e.estado = 'indo';
     const tr = e.estado === 'indo' && torreNoCaminho(e);
-    if (tr) {
+    if (e.estado === 'cacando') {
+      if (dv > e.r + visto.r + 2) andarAte(e, visto.x, visto.y, e.vel * dt); else e.dir = Math.atan2(visto.y - e.y, visto.x - e.x);
+    } else if (tr) {
       // passou perto de uma torre: para e bate nela até quebrar
       if (dist(e, tr) > e.r + tr.r + 2) andarAte(e, tr.x, tr.y, e.vel * dt);
       else if (e.cd <= 0) { e.cd = 1.4; e.dir = Math.atan2(tr.y - e.y, tr.x - e.x); ferirTorre(tr, e.dano || 1); }
     } else if (e.estado === 'indo') {
       if (!alvoValido(e.alvo)) e.alvo = escolherAlvo(e);
-      if (!e.alvo) { e.estado = 'fugindo'; flutua(e.x, e.y - 28, 'Nada pra levar', COR.osso); }
+      // vai pro que estiver mais perto: a cova pra roubar ou a torre pra quebrar
+      const t = maisPerto(torres, e);
+      if (t && (!e.alvo || dist(t, e) < dist(e.alvo, e))) andarAte(e, t.x, t.y, e.vel * dt);
+      else if (!e.alvo) { e.estado = 'fugindo'; flutua(e.x, e.y - 28, 'Nada pra levar', COR.osso); }
       else if (andarAte(e, e.alvo.x + 26, e.alvo.y, e.vel * dt)) { e.estado = 'roubando'; e.prog = 0; }
     } else if (e.estado === 'roubando') {
       if (!alvoValido(e.alvo)) { e.estado = 'indo'; e.alvo = null; }
@@ -2656,7 +2670,7 @@ function desenharCoveiro(q) {
   }
   if (q.golpe > 0) {
     ctx.strokeStyle = `rgba(239,230,210,${Math.min(1, q.golpe / .16 + .2)})`; ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.arc(x, y, 36, q.dir - .9, q.dir + .9); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, CFG.alcanceGolpe, q.dir - .9, q.dir + .9); ctx.stroke();
   }
   ctx.restore();
 }
@@ -3053,6 +3067,8 @@ function desenhar() {
   desenharBases();
   const jogando = estado === 'dia' || estado === 'noite';
   const alvo = jogando && !p.caido ? alvoAtual(p) : null;
+  // alcance do golpe: bicho que encosta nesse círculo apanha
+  if (jogando && !p.caido) { circulo(p.x, p.y, CFG.alcanceGolpe); ctx.fillStyle = 'rgba(255,255,255,.04)'; ctx.fill(); ctx.strokeStyle = 'rgba(255,255,255,.2)'; ctx.lineWidth = 1.5; ctx.stroke(); }
   if (alvo) desenharAlvo(alvo);
   lampioes.forEach(l => { if (naTela(l.y)) desenharLampiao(l); });
   const ents = inimigos.map(e => ({ y: e.y, f: () => (e.tipo === 'zumbi' ? desenharZumbi(e) : e.tipo === 'chefe' ? desenharChefe(e) : e.tipo === 'necro' ? desenharNecro(e) : desenharLadrao(e)) }));
@@ -3117,7 +3133,7 @@ function pinta(id, prop, val) {
   if (cache[chave] === val) return;
   cache[chave] = val;
   const el = $('#' + id);
-  if (prop === 'width') el.style.width = val; else el[prop] = val;
+  if (prop === 'width' || prop.startsWith('--')) el.style.setProperty(prop, val); else el[prop] = val;
 }
 const fmt = s => { s = Math.max(0, Math.ceil(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
@@ -3132,9 +3148,11 @@ function atualizarHUD() {
   pinta('hud-barra', 'width', (ativo ? Math.max(0, relogio / dur) * 100 : 100).toFixed(1) + '%');
   pinta('hud-dinheiro', 'textContent', `$${dinheiro}`);
   pinta('hud-meta', 'textContent', infinito ? '' : `de $${meta}`);
-  let v = '';
-  for (let i = 0; i < vidaMaxima(); i++) v += i < p.vida ? '♥' : '<span class="vazio">♥</span>';
-  pinta('hud-vida', 'innerHTML', v);
+  const vmax = vidaMaxima(), vida = Math.max(0, Math.min(vmax, p.vida));
+  pinta('hud-vida-barra', 'width', (100 * vida / vmax).toFixed(1) + '%');
+  pinta('hud-vida', '--n', String(vmax));
+  pinta('hud-vida', 'ariaValueMax', String(vmax));
+  pinta('hud-vida', 'ariaValueNow', String(vida));
   pinta('btn-vel', 'textContent', velJogo === 1 ? '1x' : String(velJogo).replace('.', ',') + 'x');
   pinta('btn-vel', 'className', 'hud-btn' + (velJogo === 1 ? '' : ' ligado'));
   pinta('hud-ferramenta', 'textContent', ferramenta().nome);
