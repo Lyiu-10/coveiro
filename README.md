@@ -4,8 +4,9 @@ Jogo de cemitério no navegador, sozinho ou online com amigos.
 
 **Jogar agora:** https://lyiu-10.github.io/coveiro/
 
-- Três classes (guerreiro, arqueiro e mago), cada uma com árvore de habilidades
-- Campanha por estações em três cemitérios, com chefes
-- Modo online para jogar com amigos
+Tem duas versões no ar:
 
-Feito em Unity, com build WebGL publicado no GitHub Pages. Construído com IA (Claude Code) como ferramenta de desenvolvimento.
+- **Versão web** (link acima): JavaScript em canvas, com chefes e modo online com amigos por sala (PeerJS).
+- **Versão Unity** (https://lyiu-10.github.io/coveiro/unity/): build WebGL com três classes (guerreiro, arqueiro e mago), árvore de habilidades e campanha por estações em três cemitérios.
+
+As duas estão publicadas no GitHub Pages e foram construídas com IA (Claude Code) como ferramenta de desenvolvimento.
